@@ -1,0 +1,45 @@
+{
+  "appName": "SPRINKLER",
+  "photographerName": "Sprinkler",
+  "server": {
+    "port": 3001,
+    "host": "0.0.0.0"
+  },
+  "imageSources": [
+    {
+      "id": "macos-photos",
+      "name": "macOS Photo Gallery",
+      "type": "local",
+      "path": "/Users/sprinkler/PhotoWall-Gallery/photos",
+      "enabled": true,
+      "defaultCategory": "Gallery",
+      "useFolderAsCategory": true,
+      "watch": true
+    }
+  ],
+  "thumbnails": {
+    "width": 800,
+    "quality": 80,
+    "format": "jpeg",
+    "cacheDir": "/Users/sprinkler/openclaw/PhotoWall/server/cache/thumbnails",
+    "maxCacheSize": 1000,
+    "autoClean": true
+  },
+  "supportedFormats": [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".avif",
+    ".gif"
+  ],
+  "autoRefreshInterval": 60000,
+  "enableFileWatcher": true,
+  "_AI_ANALYSIS_CONFIG": "AI configuration - use environment variables for sensitive data",
+  "_ENV_VARS_INSTRUCTIONS": "Set AI_API_ENDPOINT, AI_API_KEY, AI_MODEL as environment variables",
+  "aiApiEndpoint": "",
+  "aiApiKey": "",
+  "aiModel": "",
+  "enableAutoAnalysis": true,
+  "aiCacheDir": "./server/cache/analysis"
+}

@@ -1,0 +1,242 @@
+/**
+ * Dynamic Photo Gallery Server
+ * Express server with real-time image source management
+ */
+
+import express from 'express';
+import cors from 'cors';
+import compression from 'compression';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import path from 'path';
+import fs from 'fs-extra';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+import { GalleryService } from './services/galleryService.js';
+import { AIAnalysisService } from './services/aiAnalysisService.js';
+import { VectorSearchService } from './services/vectorSearchService.js';
+import { createApiRouter } from './routes/api.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables from .env file
+dotenv.config();
+
+// Load configuration
+const configPath = path.join(__dirname, 'config.json');
+let config;
+
+try {
+  config = await fs.readJson(configPath);
+} catch (error) {
+  console.error('Failed to load config:', error.message);
+  config = {
+    appName: "SPRINKLER",
+    photographerName: "Sprinkler",
+    server: { port: 3001, host: '0.0.0.0' },
+    imageSources: [],
+    thumbnails: {
+      width: 800,
+      quality: 80,
+      format: 'jpeg',
+      cacheDir: './server/cache/thumbnails'
+    },
+    supportedFormats: ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif'],
+    autoRefreshInterval: 60000,
+    enableFileWatcher: true
+  };
+}
+
+// Override sensitive config with environment variables
+// Environment variables take precedence over config.json
+if (process.env.AI_API_ENDPOINT) {
+  config.aiApiEndpoint = process.env.AI_API_ENDPOINT;
+}
+if (process.env.AI_API_KEY) {
+  config.aiApiKey = process.env.AI_API_KEY;
+}
+if (process.env.AI_MODEL) {
+  config.aiModel = process.env.AI_MODEL;
+}
+
+// Log configuration source (without exposing the actual key)
+console.log('🔧 Configuration loaded:');
+console.log(`   AI Endpoint: ${config.aiApiEndpoint || 'not set'} ${process.env.AI_API_ENDPOINT ? '(from env)' : '(from config)'}`);
+console.log(`   AI Key: ${config.aiApiKey ? '***' + config.aiApiKey.slice(-4) : 'not set'} ${process.env.AI_API_KEY ? '(from env)' : '(from config)'}`);
+console.log(`   AI Model: ${config.aiModel || 'not set'} ${process.env.AI_MODEL ? '(from env)' : '(from config)'}`);
+
+// Create Express app
+const app = express();
+const httpServer = createServer(app);
+
+// Create Socket.IO server for real-time updates
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+// Initialize Gallery Service
+const galleryService = new GalleryService(config);
+
+// Initialize AI Analysis Service
+const aiAnalysisService = new AIAnalysisService(config);
+
+// Initialize Vector Search Service
+const vectorSearchService = new VectorSearchService(config);
+
+// Log AI analysis status
+if (aiAnalysisService.isAvailable()) {
+  console.log('🧠 AI Analysis Service initialized');
+  console.log(`   Model: ${config.aiModel || 'default'}`);
+  console.log(`   Auto-analysis: ${config.enableAutoAnalysis !== false ? 'enabled' : 'disabled'}`);
+} else {
+  console.log('🧠 AI Analysis Service not configured');
+  console.log('   Set AI_API_ENDPOINT and AI_API_KEY in config.json or environment variables');
+}
+
+// Log Vector Search status
+console.log('🔍 Vector Search Service initialized');
+console.log(`   Indexed: ${vectorSearchService.getStats().totalIndexed} photos`);
+console.log('   Model: Universal Sentence Encoder (local)');
+
+// Set up real-time events
+galleryService.on('photoAdded', (photo) => {
+  io.emit('photo:added', {
+    id: photo.id,
+    url: `/api/image/${photo.id}`,
+    thumbnail: `/api/thumbnail/${photo.id}`,
+    title: photo.title,
+    category: photo.category,
+    date: photo.date,
+    location: photo.location,
+    exif: photo.exif
+  });
+});
+
+galleryService.on('photoRemoved', (photoId) => {
+  io.emit('photo:removed', { id: photoId });
+});
+
+galleryService.on('photoUpdated', (photo) => {
+  io.emit('photo:updated', {
+    id: photo.id,
+    url: `/api/image/${photo.id}`,
+    thumbnail: `/api/thumbnail/${photo.id}`,
+    title: photo.title,
+    category: photo.category,
+    date: photo.date,
+    location: photo.location,
+    exif: photo.exif
+  });
+});
+
+galleryService.on('scanStart', (sourceId) => {
+  io.emit('scan:start', { sourceId });
+});
+
+galleryService.on('scanComplete', (sourceId, count) => {
+  io.emit('scan:complete', { sourceId, count });
+});
+
+galleryService.on('refreshComplete', () => {
+  io.emit('gallery:refreshed', galleryService.getStats());
+});
+
+// Middleware
+app.use(cors());
+app.use(compression());
+app.use(express.json());
+
+// Request logging
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (!req.path.includes('/thumbnail/') && !req.path.includes('/image/')) {
+      console.log(`${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
+    }
+  });
+  next();
+});
+
+// API Routes
+app.use('/api', createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config));
+
+// Serve static files from dist (built frontend)
+const distPath = path.join(__dirname, '../dist');
+if (await fs.pathExists(distPath)) {
+  app.use(express.static(distPath));
+  
+  // SPA fallback
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(distPath, 'index.html'));
+    }
+  });
+}
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Server Error:', err);
+  res.status(500).json({
+    success: false,
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+  });
+});
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log(`📱 Client connected: ${socket.id}`);
+  
+  // Send initial stats
+  socket.emit('gallery:stats', galleryService.getStats());
+  
+  socket.on('disconnect', () => {
+    console.log(`📴 Client disconnected: ${socket.id}`);
+  });
+
+  // Allow clients to request refresh
+  socket.on('gallery:refresh', async () => {
+    await galleryService.refreshAll();
+  });
+});
+
+// Initialize and start server
+async function start() {
+  console.log('🚀 Starting Dynamic Photo Gallery Server...\n');
+  
+  // Initialize gallery service
+  await galleryService.initialize();
+  
+  // Start server
+  const { port, host } = config.server;
+  httpServer.listen(port, host, () => {
+    console.log(`\n🌐 Server running at http://${host}:${port}`);
+    console.log(`📡 API available at http://${host}:${port}/api`);
+    console.log(`🔌 WebSocket enabled for real-time updates\n`);
+    console.log('Available endpoints:');
+    console.log('  GET  /api/photos          - Get all photos');
+    console.log('  GET  /api/photos/:id      - Get single photo');
+    console.log('  GET  /api/image/:id       - Get full image');
+    console.log('  GET  /api/thumbnail/:id   - Get thumbnail');
+    console.log('  GET  /api/categories      - Get categories');
+    console.log('  GET  /api/sources         - Get image sources');
+    console.log('  POST /api/sources         - Add new source');
+    console.log('  POST /api/sources/:id/scan- Scan a source');
+    console.log('  POST /api/refresh         - Refresh all');
+    console.log('  GET  /api/stats           - Get statistics');
+    console.log('  GET  /api/config          - Get configuration');
+    console.log('');
+  });
+}
+
+start().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
+
+export { app, galleryService };
