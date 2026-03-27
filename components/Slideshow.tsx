@@ -77,7 +77,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
   const [isLoading, setIsLoading]       = useState(true);
   const [displayedUrl, setDisplayedUrl] = useState(''); // ★ 加载完成后才放上 img 标签
-  const isTransitioning = displayedUrl !== effectiveUrl; // ★ 是否正在切换到新图
   const [transition, setTransition]     = useState<TransitionType>('kenburns');
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
@@ -292,6 +291,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const effectiveUrl = currentPhoto
     ? (imageQuality === 'original' && currentPhoto.originalUrl ? currentPhoto.originalUrl : currentPhoto.url)
     : '';
+  const isTransitioning = displayedUrl !== effectiveUrl; // ★ 是否正在切换到新图
 
   /* ---------- Ken Burns helper ---------- */
   const getKenBurns = (idx: number) => {
