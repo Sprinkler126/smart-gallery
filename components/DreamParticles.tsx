@@ -301,11 +301,11 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
           return;
         }
 
-        // 设置 canvas 物理尺寸（CSS 尺寸由 w-full h-full 控制）
+        // 设置 canvas 物理尺寸 + CSS 尺寸（显式设置，避免百分比偏差）
         canvas.width = Math.round(cssW * dpr);
         canvas.height = Math.round(cssH * dpr);
-        canvas.style.width = '';
-        canvas.style.height = '';
+        canvas.style.width = cssW + 'px';
+        canvas.style.height = cssH + 'px';
 
         // ★ 计算照片在容器中的实际显示区域（object-contain 语义）
         const rect = calcContainRect(cssW, cssH, img.naturalWidth, img.naturalHeight);
@@ -381,7 +381,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0 w-full h-full"
+      className="absolute inset-0"
       style={{
         zIndex: 0,
         pointerEvents: 'none',

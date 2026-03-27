@@ -77,6 +77,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
   const [isLoading, setIsLoading]       = useState(true);
   const [displayedUrl, setDisplayedUrl] = useState(''); // ★ 加载完成后才放上 img 标签
+  const isTransitioning = displayedUrl !== effectiveUrl; // ★ 是否正在切换到新图
   const [transition, setTransition]     = useState<TransitionType>('kenburns');
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
@@ -325,8 +326,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         return (prev + direction + len) % len;
       }
     });
-    setImageLoaded(false);
-    setDisplayedUrl(''); // ★ 切换照片时清空
+    // ★ 不再清空 displayedUrl 和 imageLoaded，保留旧图直到新图准备好
 
     // 清除上一次的 prevIndex 清理定时器
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
@@ -351,7 +351,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     if (!currentPhoto || !effectiveUrl) return;
     let cancelled = false;
 
-    setImageLoaded(false);
+    // ★ 不立即清空状态，保留旧图显示
     setThumbnailLoaded(false);
 
     const thumbKey = `thumb:${effectiveUrl}`;
@@ -628,15 +628,15 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
-              {/* 梦幻粒子效果（原图加载中时显示） */}
-              {!imageLoaded && (
+              {/* 梦幻粒子效果（切换新图时显示） */}
+              {isTransitioning && (
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
                 />
               )}
               {/* 缩略图（半透明叠加在粒子上） */}
-              {!imageLoaded && thumbnailLoaded && (
+              {isTransitioning && thumbnailLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
                   <img
                     key={`${currentPhoto.id}-thumb`}
@@ -654,7 +654,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 className="absolute inset-0 flex items-center justify-center"
                 style={{
                   zIndex: 1,
-                  opacity: imageLoaded ? 1 : 0,
+                  opacity: displayedUrl ? 1 : 0, // ★ 有 URL 就显示，避免闪屏
                   transition: transition === 'pageflip' && isFlipping 
                     ? 'none'
                     : `opacity ${TRANSITION_MS}ms ease`,
@@ -700,13 +700,13 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               )}
             </div>
             <div className="flex-[2] h-full relative">
-              {/* 梦幻粒子效果（原图加载中时显示） */}
+              {/* 梦幻粒子效果（切换新图时显示） */}
               <DreamParticles
                 thumbnailUrl={currentPhoto.thumbnail}
-                visible={!imageLoaded}
+                visible={isTransitioning}
               />
               {/* 缩略图（半透明叠加在粒子上） */}
-              {!imageLoaded && thumbnailLoaded && (
+              {isTransitioning && thumbnailLoaded && (
                 <img
                   key={`${currentPhoto.id}-thumb`}
                   src={currentPhoto.thumbnail}
@@ -723,7 +723,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 className="absolute inset-0 w-full h-full object-contain"
                 style={{
                   zIndex: 2,
-                  opacity: imageLoaded ? 1 : 0,
+                  opacity: displayedUrl ? 1 : 0, // ★ 有 URL 就显示
                   transition: `opacity ${TRANSITION_MS}ms ease`,
                 }}
               />
