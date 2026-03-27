@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Photo } from '../types';
 import DreamParticles from './DreamParticles';
+import ProgressBar from './slideshow/ProgressBar';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -76,7 +77,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
   const [isLoading, setIsLoading]       = useState(true);
   const [transition, setTransition]     = useState<TransitionType>('kenburns');
-  const [progress, setProgress]         = useState(0);
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
   const [imageQuality, setImageQuality] = useState<'display' | 'original'>('display'); // 画质模式
@@ -325,7 +325,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }
     });
     setImageLoaded(false);
-    setProgress(0);
 
     // 清除上一次的 prevIndex 清理定时器
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
@@ -336,57 +335,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   }, [isRandomOrder, shuffledIndices]); // 依赖随机播放状态
 
   /* ================================================================ */
-  /*  ★ 自动播放：唯一的一个 setInterval，mount 时创建，unmount 时销毁  */
-  /*  回调内通过 ref 读取最新状态，永远不需要重建                       */
+  /*  ★ 自动播放：ProgressBar 组件自己管理 elapsed 和 progress         */
+  /*  只在完成时调用 navigate(1)，避免每 100ms 触发 Slideshow 重渲染   */
   /* ================================================================ */
-  useEffect(() => {
-    const elapsed = { current: 0 };
-
-    const tick = () => {
-      const { isPlaying: playing, intervalSec: sec, isLoading: loading, filteredLength: len } = playStateRef.current;
-
-      if (!playing || loading || len <= 1) {
-        // 暂停时重置进度（可选）
-        elapsed.current = 0;
-        setProgress(0);
-        return;
-      }
-
-      elapsed.current += PROGRESS_TICK;
-      const total = sec * 1000;
-      const pct = Math.min(elapsed.current / total, 1);
-      setProgress(pct);
-
-      if (elapsed.current >= total) {
-        elapsed.current = 0;
-        setProgress(0);
-        // 翻页
-        navigate(1);
-      }
-    };
-
-    const id = window.setInterval(tick, PROGRESS_TICK);
-    return () => window.clearInterval(id);
-  }, [navigate]); // navigate 是稳定的，所以这个 Effect 只跑一次
-
-  // 手动翻页时重置计时
-  // （navigate 里已经 setProgress(0)，但 elapsed 在 interval 闭包里，
-  //   所以我们用一个额外 ref 来通知 interval 重置 elapsed）
-  // → 更简洁的做法：让 interval 监听 currentIndex 变化自动重置
-  const lastIndexRef = useRef(currentIndex);
-  useEffect(() => {
-    // currentIndex 变了 = 翻页了（不管手动还是自动），interval 的 elapsed 需要重置
-    // 由于 elapsed 在闭包里我们拿不到，改用另一种方式：
-    // 直接重启 interval（只在 index 变化时）
-    // 但这又回到了老路... 所以我们改为：
-    // 把 elapsed 也放到 ref 里
-    lastIndexRef.current = currentIndex;
-  }, [currentIndex]);
-
-  // ★ 更干净的做法：把 elapsed 也放到 playStateRef
-  // 重写上面的自动播放 Effect：
-
-  // （删除上面的 useEffect，用下面这个替代）
+  const handleProgressComplete = useCallback(() => {
+    navigate(1);
+  }, [navigate]);
 
   /* ================================================================ */
   /*  ★ 图片加载：缩略图优先 + 缓存检测 + 渐进切换                     */
@@ -576,7 +530,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const changeInterval = useCallback((sec: IntervalOption) => {
     setIntervalSec(sec);
     playStateRef.current.intervalSec = sec;
-    setProgress(0);
     setShowSettings(false);
   }, []);
 
@@ -675,8 +628,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
-                  width={1920}
-                  height={1080}
                 />
               )}
               {/* 缩略图（半透明叠加在粒子上） */}
@@ -748,8 +699,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               <DreamParticles
                 thumbnailUrl={currentPhoto.thumbnail}
                 visible={!imageLoaded}
-                width={1280}
-                height={960}
               />
               {/* 缩略图（半透明叠加在粒子上） */}
               {!imageLoaded && thumbnailLoaded && (
@@ -995,12 +944,14 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         </div>
       </div>
 
-      {/* Progress Bar - 始终显示 */}
-      <div className="absolute bottom-0 left-0 right-0 z-40 h-[2px]">
-        <div className="h-full bg-white/10 relative overflow-hidden">
-          <div className="h-full bg-yellow-400/60" style={{ width: `${progress * 100}%`, transition: 'width 0.1s linear' }} />
-        </div>
-      </div>
+      {/* Progress Bar - 使用 ref 避免重渲染 */}
+      <ProgressBar
+        isPlaying={isPlaying}
+        intervalSec={intervalSec}
+        isLoading={isLoading}
+        currentIndex={currentIndex}
+        onComplete={handleProgressComplete}
+      />
       
       {/* Page Flip Animation Styles */}
       <style>{`

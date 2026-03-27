@@ -2,7 +2,7 @@
  * DreamParticles - 沙粒消散效果（优化版）
  * 粒子构成照片，逐渐飘散消逝，如梦境回忆般
  */
-import { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, memo } from 'react';
 
 interface SandParticle {
   x: number;
@@ -33,7 +33,7 @@ const CONFIG = {
   FADE_SPEED: 0.015,    // 淡出速度
 };
 
-export default function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
+function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<SandParticle[]>([]);
   const animRef = useRef<number>(0);
@@ -266,3 +266,5 @@ export default function DreamParticles({ thumbnailUrl, visible }: DreamParticles
     />
   );
 }
+
+export default memo(DreamParticles);
