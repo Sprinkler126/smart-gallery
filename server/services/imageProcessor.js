@@ -348,6 +348,45 @@ export class ImageProcessor {
   }
 
   /**
+   * Get or create a 4K display image (max 3840px, quality 85, progressive JPEG)
+   * For slideshow use - much smaller than original but still sharp on 4K displays
+   */
+  async getDisplayImage(imagePath) {
+    try {
+      if (!this.isSupportedFormat(imagePath)) return null;
+      if (await this.isHeifFormat(imagePath)) return null;
+
+      const stats = await fs.stat(imagePath);
+      const hash = this.generateImageHash(imagePath, stats);
+      const displayFilename = `display_${hash}.jpg`;
+      const displayDir = path.join(path.dirname(this.cacheDir), 'display');
+      const displayPath = path.join(displayDir, displayFilename);
+
+      // Return cached if exists
+      if (await fs.pathExists(displayPath)) {
+        return { path: displayPath, filename: displayFilename, cached: true };
+      }
+
+      await fs.ensureDir(displayDir);
+
+      // Generate 4K display image
+      await sharp(imagePath)
+        .rotate()
+        .resize(3840, null, {
+          withoutEnlargement: true,
+          fit: 'inside',
+        })
+        .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+        .toFile(displayPath);
+
+      return { path: displayPath, filename: displayFilename, cached: false };
+    } catch (error) {
+      console.error(`Error generating display image for ${imagePath}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Clean up old cache based on size limit (LRU-style)
    */
   async cleanupOldCache() {

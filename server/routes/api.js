@@ -43,7 +43,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       // Transform photos to API format
       const photos = result.photos.map(photo => ({
         id: photo.id,
-        url: `/api/image/${photo.id}`,
+        url: `/api/display/${photo.id}`,
+        originalUrl: `/api/image/${photo.id}`,
         thumbnail: `/api/thumbnail/${photo.id}`,
         blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
         title: photo.title,
@@ -92,7 +93,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         success: true,
         data: {
           id: photo.id,
-          url: `/api/image/${photo.id}`,
+          url: `/api/display/${photo.id}`,
+          originalUrl: `/api/image/${photo.id}`,
           thumbnail: `/api/thumbnail/${photo.id}`,
           blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
           title: photo.title,
@@ -148,6 +150,38 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         success: false,
         error: error.message
       });
+    }
+  });
+
+  /**
+   * GET /api/display/:id
+   * Serve 4K compressed display image (for slideshow)
+   */
+  router.get('/display/:id', async (req, res) => {
+    try {
+      const photo = galleryService.getPhoto(req.params.id);
+
+      if (!photo) {
+        return res.status(404).json({ success: false, error: 'Photo not found' });
+      }
+
+      if (!await fs.pathExists(photo.originalPath)) {
+        return res.status(404).json({ success: false, error: 'Image file not found' });
+      }
+
+      // Generate or get cached 4K display image
+      const display = await galleryService.imageProcessor.getDisplayImage(photo.originalPath);
+
+      if (!display) {
+        // Fallback to original if display generation fails
+        return res.sendFile(photo.originalPath);
+      }
+
+      res.set('Cache-Control', 'public, max-age=31536000');
+      res.set('ETag', `"disp-${photo.lastModified || photo.id.replace(/[^a-zA-Z0-9]/g, '-')}"`);
+      res.sendFile(display.path);
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
@@ -793,7 +827,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         data: results.map(r => ({
           photo: {
             id: r.photo.id,
-            url: `/api/image/${r.photo.id}`,
+            url: `/api/display/${r.photo.id}`,
+            originalUrl: `/api/image/${r.photo.id}`,
             thumbnail: `/api/thumbnail/${r.photo.id}`,
             title: r.photo.title,
             category: r.photo.category,
@@ -999,7 +1034,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.get('/bgm/list', async (req, res) => {
     try {
-      const bgmDir = path.resolve('../bgm');
+      const __dirname = path.dirname(new URL(import.meta.url).pathname);
+      const bgmDir = path.resolve(__dirname, '../../bgm');
       
       if (!await fs.pathExists(bgmDir)) {
         return res.json({
@@ -1039,7 +1075,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.get('/bgm/:filename', async (req, res) => {
     try {
-      const bgmDir = path.resolve('../bgm');
+      const __dirname = path.dirname(new URL(import.meta.url).pathname);
+      const bgmDir = path.resolve(__dirname, '../../bgm');
       const filename = decodeURIComponent(req.params.filename);
       const filePath = path.join(bgmDir, filename);
 

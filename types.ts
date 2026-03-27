@@ -1,6 +1,7 @@
 export interface Photo {
   id: string;
   url: string;
+  originalUrl: string;  // Full resolution original image
   thumbnail: string;
   blurPlaceholder?: string; // Base64 encoded tiny blurred image for LQIP
   title: string;

@@ -78,6 +78,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [progress, setProgress]         = useState(0);
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
+  const [imageQuality, setImageQuality] = useState<'display' | 'original'>('display'); // 画质模式
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]); // 随机排序后的索引
   
   /* ---------- Page Flip 状态 ---------- */
@@ -96,6 +97,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const prevIndexTimer   = useRef<ReturnType<typeof setTimeout>>();
   const kenBurnsCache    = useRef<Map<number, KenBurnsTransform>>(new Map());
   const audioRef         = useRef<HTMLAudioElement | null>(null);
+
+  // ★ 图片预加载缓存
+  const preloadedUrls    = useRef<Set<string>>(new Set());
+  const imageCache       = useRef<Map<string, HTMLImageElement>>(new Map());
 
   // ★ 核心：用一个 ref 保存自动播放需要读取的所有"最新值"
   // 这样定时器回调永远读到最新状态，不需要重建定时器
@@ -141,28 +146,45 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     }
   }, [isRandomOrder, generateShuffledIndices]);
   
-  // 预加载下一张照片（顺序播放和随机播放都支持）
-  const preloadNextPhoto = useCallback(() => {
-    if (filteredPhotos.length <= 1) return;
-    
-    let nextIndex: number;
-    if (isRandomOrder && shuffledIndices.length > 0) {
-      // 随机播放：找到当前在随机列表中的位置，取下一个
-      const currentShuffledIdx = shuffledIndices.indexOf(currentIndex);
-      const nextShuffledIdx = (currentShuffledIdx + 1) % shuffledIndices.length;
-      nextIndex = shuffledIndices[nextShuffledIdx];
-    } else {
-      // 顺序播放
-      nextIndex = (currentIndex + 1) % filteredPhotos.length;
+  // ★ 智能预加载：当前照片先缩略图后原图，后面 5 张依次预加载
+  const PRELOAD_AHEAD = 5;
+  const qualityRef = useRef(imageQuality);
+  useEffect(() => { qualityRef.current = imageQuality; }, [imageQuality]);
+
+  const preloadRange = useCallback((centerIdx: number, list: Photo[]) => {
+    const len = list.length;
+    if (len <= 1) return;
+    const quality = qualityRef.current;
+
+    for (let offset = 1; offset <= PRELOAD_AHEAD; offset++) {
+      const idx = (centerIdx + offset) % len;
+      const photo = list[idx];
+      if (!photo) continue;
+
+      const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
+
+      // Phase 1: 先加载缩略图（小文件，快速到位）
+      const thumbKey = `thumb:${photoUrl}`;
+      if (!preloadedUrls.current.has(thumbKey) && photo.thumbnail) {
+        preloadedUrls.current.add(thumbKey);
+        const tImg = new window.Image();
+        tImg.src = photo.thumbnail;
+        imageCache.current.set(thumbKey, tImg);
+      }
+
+      // Phase 2: 再加载原图（大文件，低优先级不阻塞当前显示）
+      const fullKey = `full:${photoUrl}`;
+      if (!preloadedUrls.current.has(fullKey)) {
+        preloadedUrls.current.add(fullKey);
+        const fImg = new window.Image();
+        // 用 setTimeout 让当前照片优先加载，避免大图抢占带宽
+        setTimeout(() => {
+          fImg.src = photoUrl;
+          imageCache.current.set(fullKey, fImg);
+        }, offset * 100); // 每张延迟 100ms，越远越晚加载
+      }
     }
-    
-    const nextPhoto = filteredPhotos[nextIndex];
-    if (nextPhoto) {
-      const img = new window.Image();
-      img.src = nextPhoto.url;
-      console.log('📥 Preloading next photo:', nextIndex, nextPhoto.title);
-    }
-  }, [currentIndex, filteredPhotos, isRandomOrder, shuffledIndices]);
+  }, []);
 
   useEffect(() => { playStateRef.current.isPlaying = isPlaying; }, [isPlaying]);
   useEffect(() => { playStateRef.current.intervalSec = intervalSec; }, [intervalSec]);
@@ -263,6 +285,11 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     : 0;
   const currentPhoto = filteredPhotos[safeIndex];
 
+  // 根据画质设置选择 URL
+  const effectiveUrl = currentPhoto
+    ? (imageQuality === 'original' && currentPhoto.originalUrl ? currentPhoto.originalUrl : currentPhoto.url)
+    : '';
+
   /* ---------- Ken Burns helper ---------- */
   const getKenBurns = (idx: number) => {
     if (!kenBurnsCache.current.has(idx)) {
@@ -361,61 +388,79 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   // （删除上面的 useEffect，用下面这个替代）
 
   /* ================================================================ */
-  /*  图片预加载 - 同时加载缩略图和原图                                */
+  /*  ★ 图片加载：缩略图优先 + 缓存检测 + 渐进切换                     */
   /* ================================================================ */
   useEffect(() => {
-    if (!currentPhoto) return;
+    if (!currentPhoto || !effectiveUrl) return;
     let cancelled = false;
-    
-    // 重置加载状态
+
     setImageLoaded(false);
     setThumbnailLoaded(false);
-    
-    // 同时加载缩略图和原图
-    const thumbImg = new window.Image();
-    const fullImg = new window.Image();
-    
-    // 缩略图加载
-    if (currentPhoto.thumbnail) {
-      thumbImg.src = currentPhoto.thumbnail;
-      thumbImg.onload = () => { 
+
+    const thumbKey = `thumb:${effectiveUrl}`;
+    const fullKey = `full:${effectiveUrl}`;
+
+    // ① 两个都已缓存 → 瞬间显示，零等待
+    if (preloadedUrls.current.has(thumbKey) && preloadedUrls.current.has(fullKey)) {
+      setThumbnailLoaded(true);
+      setImageLoaded(true);
+      return;
+    }
+
+    // ② 只有缩略图已缓存 → 先显示缩略图，继续加载原图
+    if (preloadedUrls.current.has(thumbKey)) {
+      setThumbnailLoaded(true);
+    }
+
+    // ③ 加载缩略图（如果还没缓存）
+    if (currentPhoto.thumbnail && !preloadedUrls.current.has(thumbKey)) {
+      const tImg = new window.Image();
+      tImg.src = currentPhoto.thumbnail;
+      tImg.onload = () => {
         if (!cancelled) {
+          preloadedUrls.current.add(thumbKey);
+          imageCache.current.set(thumbKey, tImg);
           setThumbnailLoaded(true);
-          console.log('✅ Thumbnail loaded:', currentPhoto.title);
         }
       };
     }
-    
-    // 原图加载
-    fullImg.src = currentPhoto.url;
-    fullImg.onload = () => { 
-      if (!cancelled) {
-        setImageLoaded(true);
-        console.log('✅ Full image loaded:', currentPhoto.title);
-      }
-    };
-    fullImg.onerror = () => {
-      if (!cancelled) {
-        // 加载失败直接跳过，不重试（避免循环）
-        console.warn('⏭️ Image load failed, skipping:', currentPhoto.title);
-        navigate(1);
-      }
-    };
-    
-    return () => { 
-      cancelled = true; 
-      thumbImg.src = ''; 
-      fullImg.src = ''; 
-    };
-  }, [safeIndex, currentPhoto?.url, currentPhoto?.thumbnail]); // 只在真正换照片时触发
 
-  // 预加载下一张（使用智能预加载，支持随机和顺序播放）
-  useEffect(() => {
-    // 当前照片加载完成后，预加载下一张
-    if (imageLoaded) {
-      preloadNextPhoto();
+    // ④ 加载原图（延迟 50ms，让缩略图优先获得带宽）
+    if (!preloadedUrls.current.has(fullKey)) {
+      const fImg = new window.Image();
+      const timer = setTimeout(() => {
+        if (cancelled) return;
+        fImg.src = effectiveUrl;
+        fImg.onload = () => {
+          if (!cancelled) {
+            preloadedUrls.current.add(fullKey);
+            imageCache.current.set(fullKey, fImg);
+            setImageLoaded(true);
+          }
+        };
+        fImg.onerror = () => {
+          if (!cancelled) {
+            console.warn('⏭️ Image load failed, skipping:', currentPhoto.title);
+            navigate(1);
+          }
+        };
+      }, currentPhoto.thumbnail ? 50 : 0);
+
+      return () => { cancelled = true; clearTimeout(timer); };
+    } else {
+      // 原图已缓存但缩略图可能还没标记
+      setImageLoaded(true);
     }
-  }, [imageLoaded, preloadNextPhoto]);
+
+    return () => { cancelled = true; };
+  }, [safeIndex, effectiveUrl, currentPhoto?.thumbnail]);
+
+  // ⑤ 预加载后续照片（当前照片有任何一张加载到位就开始）
+  useEffect(() => {
+    if (imageLoaded || thumbnailLoaded) {
+      preloadRange(safeIndex, filteredPhotos);
+    }
+  }, [imageLoaded, thumbnailLoaded, safeIndex, filteredPhotos, preloadRange]);
 
   /* ================================================================ */
   /*  加载 orientations                                                */
@@ -624,23 +669,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
-              {/* Thumbnail placeholder - shown while full image loads */}
-              {!imageLoaded && thumbnailLoaded && (
-                <div
-                  className="absolute inset-0 flex items-center justify-center"
-                  style={{ zIndex: 0 }}
-                >
-                  <img
-                    src={currentPhoto.thumbnail}
-                    alt={currentPhoto.title}
-                    className="max-w-full max-h-full object-contain select-none blur-sm"
-                    draggable={false}
-                    style={{ filter: 'blur(8px)' }}
-                  />
-                </div>
-              )}
-              
-              {/* Thumbnail placeholder (blurred preview while loading) */}
+              {/* Thumbnail placeholder - 模糊缩略图预览（原图加载中时显示） */}
               {!imageLoaded && thumbnailLoaded && (
                 <div
                   className="absolute inset-0 flex items-center justify-center z-0"
@@ -649,8 +678,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                     key={`${currentPhoto.id}-thumb`}
                     src={currentPhoto.thumbnail}
                     alt={currentPhoto.title}
-                    className="max-w-full max-h-full object-contain blur-sm opacity-60"
+                    className="max-w-full max-h-full object-contain select-none blur-sm"
                     draggable={false}
+                    style={{ filter: 'blur(12px)', opacity: 0.7 }}
                   />
                 </div>
               )}
@@ -684,7 +714,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 >
                   <img
                     key={currentPhoto.id}
-                    src={currentPhoto.url}
+                    src={effectiveUrl}
                     alt={currentPhoto.title}
                     className="max-w-full max-h-full object-contain select-none"
                     draggable={false}
@@ -718,7 +748,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               {/* 原图（加载完成后淡入） */}
               <img
                 key={currentPhoto.id}
-                src={currentPhoto.url}
+                src={effectiveUrl}
                 alt={currentPhoto.title}
                 className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-700 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
               />
@@ -824,6 +854,25 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${isRandomOrder ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
                 🔀 Random
+              </button>
+            </div>
+          </div>
+
+          {/* Image Quality */}
+          <div className="space-y-2 mb-4">
+            <p className="text-white/60 text-xs flex items-center gap-2">🖼️ Quality</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); setImageQuality('display'); }}
+                className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${imageQuality === 'display' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
+              >
+                ⚡ 4K 压缩
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setImageQuality('original'); }}
+                className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${imageQuality === 'original' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
+              >
+                💎 无损原图
               </button>
             </div>
           </div>
