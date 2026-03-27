@@ -74,6 +74,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
   const [thumbDisplayReady, setThumbDisplayReady] = useState(false); // ★ 缩略图显示满足最小时间
   const thumbLoadTimeRef = useRef<number>(0); // ★ 记录缩略图加载完成时间
+  const [nextImageReady, setNextImageReady] = useState(false); // ★ 下一张高清图是否准备好（Page Flip 模式用）
   const [orientationFilter, setOrientationFilter] = useState<OrientationFilter>('all');
   const [photoOrientations, setPhotoOrientations] = useState<Record<string, 'landscape' | 'portrait' | 'square'>>({});
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
@@ -362,11 +363,17 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
   /* ================================================================ */
   /*  ★ 自动播放：ProgressBar 组件自己管理 elapsed 和 progress         */
-  /*  只在完成时调用 navigate(1)，避免每 100ms 触发 Slideshow 重渲染   */
+  /*  Page Flip 模式下需等待下一张高清图加载完成才能切换              */
   /* ================================================================ */
   const handleProgressComplete = useCallback(() => {
+    // Page Flip 模式下，需要等待下一张高清图加载完成
+    if (transition === 'pageflip' && !nextImageReady) {
+      // 暂停播放，等待下一张图加载完成
+      setIsPlaying(false);
+      return;
+    }
     navigate(1);
-  }, [navigate]);
+  }, [navigate, transition, nextImageReady]);
 
   /* ================================================================ */
   /*  ★ 图片加载：真正异步 + 状态驱动 + 并行加载                        */
@@ -467,6 +474,73 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       preloadRange(safeIndex, filteredPhotos);
     }
   }, [imageLoaded, thumbnailLoaded, safeIndex, filteredPhotos, preloadRange]);
+
+  // ⑥ Page Flip 模式：预加载下一张高清图，加载完成后恢复播放
+  useEffect(() => {
+    if (transition !== 'pageflip') {
+      setNextImageReady(false);
+      return;
+    }
+
+    const len = filteredPhotos.length;
+    if (len <= 1) {
+      setNextImageReady(true);
+      return;
+    }
+
+    // 计算下一张的索引
+    let nextIdx: number;
+    if (isRandomOrder && shuffledIndices.length > 0) {
+      const currentShuffledIdx = shuffledIndices.indexOf(safeIndex);
+      nextIdx = shuffledIndices[(currentShuffledIdx + 1) % len];
+    } else {
+      nextIdx = (safeIndex + 1) % len;
+    }
+
+    const nextPhoto = filteredPhotos[nextIdx];
+    if (!nextPhoto) {
+      setNextImageReady(true);
+      return;
+    }
+
+    const nextUrl = imageQuality === 'original' && nextPhoto.originalUrl 
+      ? nextPhoto.originalUrl 
+      : nextPhoto.url;
+    const fullKey = `full:${nextUrl}`;
+
+    // 检查是否已缓存
+    if (preloadedUrls.current.has(fullKey)) {
+      setNextImageReady(true);
+      // 如果之前因为等待而暂停，恢复播放
+      if (!isPlaying) {
+        setIsPlaying(true);
+      }
+      return;
+    }
+
+    // 重置状态，开始加载
+    setNextImageReady(false);
+
+    // 预加载下一张高清图
+    const fImg = new window.Image();
+    fImg.src = nextUrl;
+    fImg.onload = () => {
+      preloadedUrls.current.add(fullKey);
+      imageCache.current.set(fullKey, fImg);
+      setNextImageReady(true);
+      // 加载完成，恢复播放
+      setIsPlaying(true);
+    };
+    fImg.onerror = () => {
+      // 加载失败也标记为准备好，避免卡住
+      setNextImageReady(true);
+      setIsPlaying(true);
+    };
+
+    return () => {
+      // 清理，但让图片继续加载（不 abort）
+    };
+  }, [safeIndex, filteredPhotos, transition, isRandomOrder, shuffledIndices, imageQuality, isPlaying]);
 
   /* ================================================================ */
   /*  加载 orientations                                                */
