@@ -65,10 +65,11 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [prevIndex, setPrevIndex]       = useState<number | null>(null);
   const [isPlaying, setIsPlaying]       = useState(false); // 默认暂停，10秒后自动开始
-  const [intervalSec, setIntervalSec]   = useState<IntervalOption>(5);
+  const [intervalSec, setIntervalSec]   = useState<IntervalOption>(10);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [imageLoaded, setImageLoaded]   = useState(false);
+  const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
   const [orientationFilter, setOrientationFilter] = useState<OrientationFilter>('all');
   const [photoOrientations, setPhotoOrientations] = useState<Record<string, 'landscape' | 'portrait' | 'square'>>({});
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
@@ -100,7 +101,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   // 这样定时器回调永远读到最新状态，不需要重建定时器
   const playStateRef = useRef({
     isPlaying: true,
-    intervalSec: 5 as IntervalOption,
+    intervalSec: 10 as IntervalOption,
     isLoading: true,
     filteredLength: photos.length,
   });
@@ -360,23 +361,53 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   // （删除上面的 useEffect，用下面这个替代）
 
   /* ================================================================ */
-  /*  图片预加载                                                       */
+  /*  图片预加载 - 同时加载缩略图和原图                                */
   /* ================================================================ */
   useEffect(() => {
     if (!currentPhoto) return;
     let cancelled = false;
-    const img = new window.Image();
-    img.src = currentPhoto.url;
-    img.onload = () => { if (!cancelled) setImageLoaded(true); };
-    img.onerror = () => {
+    
+    // 重置加载状态
+    setImageLoaded(false);
+    setThumbnailLoaded(false);
+    
+    // 同时加载缩略图和原图
+    const thumbImg = new window.Image();
+    const fullImg = new window.Image();
+    
+    // 缩略图加载
+    if (currentPhoto.thumbnail) {
+      thumbImg.src = currentPhoto.thumbnail;
+      thumbImg.onload = () => { 
+        if (!cancelled) {
+          setThumbnailLoaded(true);
+          console.log('✅ Thumbnail loaded:', currentPhoto.title);
+        }
+      };
+    }
+    
+    // 原图加载
+    fullImg.src = currentPhoto.url;
+    fullImg.onload = () => { 
+      if (!cancelled) {
+        setImageLoaded(true);
+        console.log('✅ Full image loaded:', currentPhoto.title);
+      }
+    };
+    fullImg.onerror = () => {
       if (!cancelled) {
         // 加载失败直接跳过，不重试（避免循环）
         console.warn('⏭️ Image load failed, skipping:', currentPhoto.title);
         navigate(1);
       }
     };
-    return () => { cancelled = true; img.src = ''; };
-  }, [safeIndex, currentPhoto?.url]); // 只在真正换照片时触发
+    
+    return () => { 
+      cancelled = true; 
+      thumbImg.src = ''; 
+      fullImg.src = ''; 
+    };
+  }, [safeIndex, currentPhoto?.url, currentPhoto?.thumbnail]); // 只在真正换照片时触发
 
   // 预加载下一张（使用智能预加载，支持随机和顺序播放）
   useEffect(() => {
@@ -593,6 +624,37 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
+              {/* Thumbnail placeholder - shown while full image loads */}
+              {!imageLoaded && thumbnailLoaded && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center"
+                  style={{ zIndex: 0 }}
+                >
+                  <img
+                    src={currentPhoto.thumbnail}
+                    alt={currentPhoto.title}
+                    className="max-w-full max-h-full object-contain select-none blur-sm"
+                    draggable={false}
+                    style={{ filter: 'blur(8px)' }}
+                  />
+                </div>
+              )}
+              
+              {/* Thumbnail placeholder (blurred preview while loading) */}
+              {!imageLoaded && thumbnailLoaded && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center z-0"
+                >
+                  <img
+                    key={`${currentPhoto.id}-thumb`}
+                    src={currentPhoto.thumbnail}
+                    alt={currentPhoto.title}
+                    className="max-w-full max-h-full object-contain blur-sm opacity-60"
+                    draggable={false}
+                  />
+                </div>
+              )}
+              
               {/* Entering / Active image */}
               <div
                 className="absolute inset-0 flex items-center justify-center"
@@ -637,24 +699,34 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
             <div className="flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (
                 <img
-                  src={filteredPhotos[(safeIndex - 1 + filteredPhotos.length) % filteredPhotos.length].url}
+                  src={filteredPhotos[(safeIndex - 1 + filteredPhotos.length) % filteredPhotos.length].thumbnail}
                   alt=""
                   className="w-full h-full object-contain"
                 />
               )}
             </div>
             <div className="flex-[2] h-full relative">
+              {/* 缩略图作为占位（模糊预览） */}
+              {!imageLoaded && thumbnailLoaded && (
+                <img
+                  key={`${currentPhoto.id}-thumb`}
+                  src={currentPhoto.thumbnail}
+                  alt={currentPhoto.title}
+                  className="absolute inset-0 w-full h-full object-contain blur-sm opacity-80"
+                />
+              )}
+              {/* 原图（加载完成后淡入） */}
               <img
                 key={currentPhoto.id}
                 src={currentPhoto.url}
                 alt={currentPhoto.title}
-                className={`w-full h-full object-contain transition-opacity duration-700 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-700 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
               />
             </div>
             <div className="flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (
                 <img
-                  src={filteredPhotos[(safeIndex + 1) % filteredPhotos.length].url}
+                  src={filteredPhotos[(safeIndex + 1) % filteredPhotos.length].thumbnail}
                   alt=""
                   className="w-full h-full object-contain"
                 />

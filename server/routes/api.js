@@ -999,7 +999,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.get('/bgm/list', async (req, res) => {
     try {
-      const bgmDir = path.resolve('./BGM');
+      const bgmDir = path.resolve('../bgm');
       
       if (!await fs.pathExists(bgmDir)) {
         return res.json({
@@ -1039,7 +1039,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.get('/bgm/:filename', async (req, res) => {
     try {
-      const bgmDir = path.resolve('./BGM');
+      const bgmDir = path.resolve('../bgm');
       const filename = decodeURIComponent(req.params.filename);
       const filePath = path.join(bgmDir, filename);
 
