@@ -89,7 +89,10 @@ smart-gallery/
 ### 4.2 幻灯片系统（Phase 1 已优化）
 - **三种切换效果**：Crossfade / Ken Burns / 3D Page Flip
 - **随机/顺序播放**：支持预加载播放列表
-- **沙粒粒子背景**：DreamParticles 组件，30fps 节流
+- **沙粒粒子背景**：DreamParticles v3 — 梦境记忆碎片感 ✅
+  - 粒子精确匹配照片 `object-contain` 区域
+  - FBM 分形噪声风场，粒子随风摆动
+  - 生命周期：飞入构成 → 随风摆动 → 飘散消逝 → 重生
 - **背景音乐同步**：暂停续播
 - **Orientation 筛选**：All / Landscape / Portrait
 
@@ -175,22 +178,23 @@ npm run build
 
 **Git 提交**：`491cc8c` - "Phase 1: Split Slideshow into memo'd sub-components"
 
-### DreamParticles v2（2026-03-27）✅ 已完成
-**目标**：沙粒构成画面 + 随风摆动 + 高分辨率
+### DreamParticles v3（2026-03-27）✅ 已完成 — 用户验收通过
+**目标**：粒子精确匹配照片位置 + 梦境记忆碎片感
+
+**用户评价**："这是我想要的效果，有梦境、记忆碎片的感觉"
 
 **变更**：
-- `STEP=4`（更密集的粒子采样，更清晰的画面）
-- `MAX_PARTICLES=15000`（更多粒子，更好的画面细节）
-- `FPS=40`（更流畅的动画）
-- `maxSize=1200`（更大的画布尺寸）
-- **devicePixelRatio 支持**：Retina 屏幕显示清晰
-- **风场模拟**：2D 噪声生成自然风场，粒子随风摆动
-- **圆形沙粒**：`arc()` 替代 `fillRect()`，更像真实沙子
-- **生命周期优化**：构成 → 摆动 → 飘散 → 重生，过渡更自然
+- **粒子坐标精确匹配 `object-contain` 区域**（核心修复）
+  - `calcContainRect()` 计算照片实际显示位置
+  - 粒子不再填满整个容器，而是精确构成照片画面
+- **FBM 分形噪声风场**（3 层叠加，更自然）
+- **圆形沙粒** + 大小不一
+- **暗角跟随照片区域**（而非容器中心）
+- `STEP=4`, `MAX_PARTICLES=12000`, `FPS=40`
 
-**Git 提交**：`66ec87e` - "🌬️ DreamParticles v2: 风场摆动 + 高分辨率 + 圆形沙粒"
+**Git 提交**：`c930c4d` - "🎯 DreamParticles v3: 粒子精确匹配照片 object-contain 区域"
 
-### DreamParticles v1（2026-03-27）✅ 已完成（已被 v2 替代）
+### DreamParticles v2（2026-03-27）✅ 已完成（已被 v3 替代）
 **变更**（v1 原始版本）：
 - `STEP=6`（每 6 像素采样一次）
 - `MAX_PARTICLES=8000`
