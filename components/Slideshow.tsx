@@ -360,6 +360,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     // ① 两个都已缓存 → 瞬间显示，零等待
     if (preloadedUrls.current.has(thumbKey) && preloadedUrls.current.has(fullKey)) {
       setThumbnailLoaded(true);
+      setDisplayedUrl(effectiveUrl); // ★ 修复：缓存命中也要设置
       setImageLoaded(true);
       return;
     }
