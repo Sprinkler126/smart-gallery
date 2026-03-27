@@ -103,9 +103,58 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const kenBurnsCache    = useRef<Map<number, KenBurnsTransform>>(new Map());
   const audioRef         = useRef<HTMLAudioElement | null>(null);
 
-  // ★ 图片预加载缓存
+  // ★ 图片预加载缓存 - LRU 机制，限制大小防止内存无限增长
+  const MAX_CACHE_SIZE = 100; // 最多缓存 100 张图片
   const preloadedUrls    = useRef<Set<string>>(new Set());
-  const imageCache       = useRef<Map<string, HTMLImageElement>>(new Map());
+  const imageCache       = useRef<Map<string, HTMLImageElement>>(new Map()); // 使用 Map 保持插入顺序
+
+  // ★ LRU 缓存管理：添加图片到缓存，自动淘汰最旧的
+  const addToImageCache = useCallback((key: string, img: HTMLImageElement) => {
+    // 如果已存在，先删除（后面会重新添加到末尾 = 最近使用）
+    if (imageCache.current.has(key)) {
+      imageCache.current.delete(key);
+    }
+    
+    // 如果超过限制，删除最旧的条目
+    while (imageCache.current.size >= MAX_CACHE_SIZE) {
+      const firstKey = imageCache.current.keys().next().value;
+      if (firstKey) {
+        imageCache.current.delete(firstKey);
+        preloadedUrls.current.delete(firstKey);
+      }
+    }
+    
+    // 添加到末尾（最近使用）
+    imageCache.current.set(key, img);
+    preloadedUrls.current.add(key);
+  }, []);
+
+  // ★ 启动时清空缓存
+  useEffect(() => {
+    preloadedUrls.current.clear();
+    imageCache.current.clear();
+    kenBurnsCache.current.clear();
+  }, []);
+
+  // ★ 定时清理：每 30 分钟清理一次，保留最近 50 张
+  useEffect(() => {
+    const CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 分钟
+    const KEEP_RECENT = 50; // 保留最近 50 张
+    
+    const interval = setInterval(() => {
+      if (imageCache.current.size > KEEP_RECENT) {
+        const entries = Array.from(imageCache.current.entries());
+        const toDelete = entries.slice(0, entries.length - KEEP_RECENT);
+        toDelete.forEach(([key]) => {
+          imageCache.current.delete(key);
+          preloadedUrls.current.delete(key);
+        });
+        console.log(`🧹 Cache cleanup: removed ${toDelete.length} items, ${imageCache.current.size} remaining`);
+      }
+    }, CLEANUP_INTERVAL);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // ★ 核心：用一个 ref 保存自动播放需要读取的所有"最新值"
   // 这样定时器回调永远读到最新状态，不需要重建定时器
@@ -173,8 +222,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         const tImg = new window.Image();
         tImg.src = nextPhoto.thumbnail;
         tImg.onload = () => {
-          preloadedUrls.current.add(nextThumbKey);
-          imageCache.current.set(nextThumbKey, tImg);
+          addToImageCache(nextThumbKey, tImg);
         };
       }
       
@@ -185,8 +233,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           const fImg = new window.Image();
           fImg.src = nextUrl;
           fImg.onload = () => {
-            preloadedUrls.current.add(nextFullKey);
-            imageCache.current.set(nextFullKey, fImg);
+            addToImageCache(nextFullKey, fImg);
           };
         }, 500);
       }
@@ -206,8 +253,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         const tImg = new window.Image();
         tImg.src = photo.thumbnail;
         tImg.onload = () => {
-          preloadedUrls.current.add(thumbKey);
-          imageCache.current.set(thumbKey, tImg);
+          addToImageCache(thumbKey, tImg);
         };
       }
     }
@@ -409,8 +455,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       tImg.src = currentPhoto.thumbnail;
       tImg.onload = () => {
         if (cancelled) return;
-        preloadedUrls.current.add(thumbKey);
-        imageCache.current.set(thumbKey, tImg);
+        addToImageCache(thumbKey, tImg);
         setThumbnailLoaded(true);
         thumbLoadTimeRef.current = Date.now();
       };
@@ -440,8 +485,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       fImg.src = effectiveUrl;
       fImg.onload = () => {
         if (cancelled) return;
-        preloadedUrls.current.add(fullKey);
-        imageCache.current.set(fullKey, fImg);
+        addToImageCache(fullKey, fImg);
         // ★ 原图加载完成，但等待最小显示时间
         waitForMinDisplay(() => {
           if (!cancelled) {
@@ -456,7 +500,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         navigate(1);
       };
     } else {
-      // 原图已缓存，同样等待最小显示时间
+      // 原图已缓存，更新 LRU 顺序，然后等待最小显示时间
+      const cachedImg = imageCache.current.get(fullKey);
+      if (cachedImg) addToImageCache(fullKey, cachedImg);
       waitForMinDisplay(() => {
         if (!cancelled) {
           setDisplayedUrl(effectiveUrl);
@@ -510,6 +556,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
     // 检查是否已缓存
     if (preloadedUrls.current.has(fullKey)) {
+      // 更新 LRU 顺序
+      const cachedImg = imageCache.current.get(fullKey);
+      if (cachedImg) addToImageCache(fullKey, cachedImg);
       setNextImageReady(true);
       // 如果之前因为等待而暂停，恢复播放
       if (!isPlaying) {
@@ -525,8 +574,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     const fImg = new window.Image();
     fImg.src = nextUrl;
     fImg.onload = () => {
-      preloadedUrls.current.add(fullKey);
-      imageCache.current.set(fullKey, fImg);
+      addToImageCache(fullKey, fImg);
       setNextImageReady(true);
       // 加载完成，恢复播放
       setIsPlaying(true);
