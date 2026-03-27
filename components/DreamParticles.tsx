@@ -1,10 +1,11 @@
 /**
- * DreamParticles v3 - 粒子精确匹配照片位置
+ * DreamParticles v5 - 粒子只在照片区域内，凝聚成高清图
  * 
- * 核心改进：
- * - 粒子坐标基于照片的实际显示区域（而非整个容器）
- * - 使用与 img 相同的 object-contain 逻辑计算绘制区域
- * - 风场摆动更加自然
+ * 核心效果：
+ * - 粒子只在照片实际显示区域内生成
+ * - 粒子带有照片对应位置的颜色
+ * - 形成"从粒子逐渐凝聚成高清照片"的视觉效果
+ * - 照片区域外保持干净（无粒子）
  */
 import React, { useEffect, useRef, useCallback, memo } from 'react';
 
@@ -30,8 +31,8 @@ interface DreamParticlesProps {
 }
 
 const CONFIG = {
-  STEP: 3,                // 采样步长：3px（更密集）
-  MAX_PARTICLES: 30000,   // 最大粒子数（覆盖全画面）
+  STEP: 2,                // 采样步长：2px（更密集，覆盖更多区域）
+  MAX_PARTICLES: 80000,   // 最大粒子数（增大以覆盖整个照片区域）
   FPS: 40,
   FORMING_MS: 1800,
   SWAY_MIN_MS: 3000,
@@ -301,11 +302,11 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
           return;
         }
 
-        // 设置 canvas 物理尺寸 + CSS 尺寸（显式设置，避免百分比偏差）
+        // 设置 canvas 物理尺寸（CSS 尺寸由 w-full h-full 控制）
         canvas.width = Math.round(cssW * dpr);
         canvas.height = Math.round(cssH * dpr);
-        canvas.style.width = cssW + 'px';
-        canvas.style.height = cssH + 'px';
+        canvas.style.width = '';
+        canvas.style.height = '';
 
         // ★ 计算照片在容器中的实际显示区域（object-contain 语义）
         const rect = calcContainRect(cssW, cssH, img.naturalWidth, img.naturalHeight);
@@ -313,45 +314,62 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
 
         console.log(`🏜️ DreamParticles: container=${cssW}x${cssH}, img=${img.naturalWidth}x${img.naturalHeight}, draw=${Math.round(rect.w)}x${Math.round(rect.h)}@(${Math.round(rect.x)},${Math.round(rect.y)})`);
 
-        // 在照片区域内采样颜色
+        // 创建照片显示区域尺寸的离屏 canvas 用于采样
         const offscreen = document.createElement('canvas');
         offscreen.width = Math.round(rect.w);
         offscreen.height = Math.round(rect.h);
         const offCtx = offscreen.getContext('2d');
         if (!offCtx) return;
 
+        // 绘制图片到离屏 canvas（填满整个 canvas）
         offCtx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
         const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
 
         const particles: SandParticle[] = [];
         const step = CONFIG.STEP;
 
-        for (let y = 0; y < offscreen.height && particles.length < CONFIG.MAX_PARTICLES; y += step) {
-          for (let x = 0; x < offscreen.width && particles.length < CONFIG.MAX_PARTICLES; x += step) {
+        // ★ 先收集所有有效像素位置，然后随机采样以均匀分布
+        const validPixels: {x: number, y: number, r: number, g: number, b: number}[] = [];
+        
+        for (let y = 0; y < offscreen.height; y += step) {
+          for (let x = 0; x < offscreen.width; x += step) {
             const i = (y * offscreen.width + x) * 4;
             const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
 
-            if (a < 60) continue;
-            if (r + g + b < 30 || r + g + b > 730) continue;
+            if (a < 30) continue;
+            if (r + g + b < 15 || r + g + b > 755) continue;
 
-            // ★ 粒子坐标 = 照片区域偏移 + 采样位置（转换为物理像素）
-            const px = (rect.x + x) * dpr;
-            const py = (rect.y + y) * dpr;
-
-            particles.push({
-              x: px, y: py,
-              originX: px, originY: py,
-              color: `rgb(${r},${g},${b})`,
-              size: (0.8 + Math.random() * 1.6) * dpr,
-              windSeed: Math.random(),
-              alpha: 0,
-              life: Math.random() * 1200,
-              maxLife: CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS),
-              phase: 'forming',
-              scatterAngle: 0,
-              scatterSpeed: 0,
-            });
+            validPixels.push({x, y, r, g, b});
           }
+        }
+
+        // ★ 如果有效像素太多，随机采样以均匀分布
+        let selectedPixels = validPixels;
+        if (validPixels.length > CONFIG.MAX_PARTICLES) {
+          // 随机打乱后取前 MAX_PARTICLES 个
+          selectedPixels = validPixels
+            .sort(() => Math.random() - 0.5)
+            .slice(0, CONFIG.MAX_PARTICLES);
+        }
+
+        // 生成粒子
+        for (const pixel of selectedPixels) {
+          const px = (rect.x + pixel.x) * dpr;
+          const py = (rect.y + pixel.y) * dpr;
+
+          particles.push({
+            x: px, y: py,
+            originX: px, originY: py,
+            color: `rgb(${pixel.r},${pixel.g},${pixel.b})`,
+            size: (0.8 + Math.random() * 1.6) * dpr,
+            windSeed: Math.random(),
+            alpha: 0,
+            life: Math.random() * 1200,
+            maxLife: CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS),
+            phase: 'forming',
+            scatterAngle: 0,
+            scatterSpeed: 0,
+          });
         }
 
         particlesRef.current = particles;
@@ -381,7 +399,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0"
+      className="absolute inset-0 w-full h-full"
       style={{
         zIndex: 0,
         pointerEvents: 'none',

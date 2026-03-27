@@ -291,7 +291,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const effectiveUrl = currentPhoto
     ? (imageQuality === 'original' && currentPhoto.originalUrl ? currentPhoto.originalUrl : currentPhoto.url)
     : '';
-  const isTransitioning = displayedUrl !== effectiveUrl; // ★ 是否正在切换到新图
 
   /* ---------- Ken Burns helper ---------- */
   const getKenBurns = (idx: number) => {
@@ -326,7 +325,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         return (prev + direction + len) % len;
       }
     });
-    // ★ 不再清空 displayedUrl 和 imageLoaded，保留旧图直到新图准备好
+    setImageLoaded(false);
+    // ★ 不再清空 displayedUrl，保持旧图显示直到新图加载完成
 
     // 清除上一次的 prevIndex 清理定时器
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
@@ -345,14 +345,15 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   }, [navigate]);
 
   /* ================================================================ */
-  /*  ★ 图片加载：缩略图优先 + 缓存检测 + 渐进切换                     */
+  /*  ★ 图片加载：缩略图优先 + 缓存检测 + 渐进切换（保持旧图显示）      */
   /* ================================================================ */
   useEffect(() => {
     if (!currentPhoto || !effectiveUrl) return;
     let cancelled = false;
 
-    // ★ 不立即清空状态，保留旧图显示
-    setThumbnailLoaded(false);
+    // ★ 切换照片时：保持旧图显示，只标记为新图未加载
+    // 不重置 thumbnailLoaded，让旧缩略图继续显示
+    setImageLoaded(false);
 
     const thumbKey = `thumb:${effectiveUrl}`;
     const fullKey = `full:${effectiveUrl}`;
@@ -360,7 +361,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     // ① 两个都已缓存 → 瞬间显示，零等待
     if (preloadedUrls.current.has(thumbKey) && preloadedUrls.current.has(fullKey)) {
       setThumbnailLoaded(true);
-      setDisplayedUrl(effectiveUrl); // ★ 修复：缓存命中也要设置
+      setDisplayedUrl(effectiveUrl);
       setImageLoaded(true);
       return;
     }
@@ -381,6 +382,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           setThumbnailLoaded(true);
         }
       };
+    } else if (!currentPhoto.thumbnail) {
+      // 没有缩略图，直接标记为已加载（会显示原图加载中）
+      setThumbnailLoaded(true);
     }
 
     // ④ 加载原图（延迟 50ms，让缩略图优先获得带宽）
@@ -393,7 +397,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           if (!cancelled) {
             preloadedUrls.current.add(fullKey);
             imageCache.current.set(fullKey, fImg);
-            setDisplayedUrl(effectiveUrl); // ★ 加载完才设置显示 URL
+            setDisplayedUrl(effectiveUrl); // ★ 加载完才切换到新图
             setImageLoaded(true);
           }
         };
@@ -628,15 +632,15 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
-              {/* 梦幻粒子效果（切换新图时显示） */}
-              {isTransitioning && (
+              {/* 梦幻粒子效果（原图加载中时显示） */}
+              {!imageLoaded && (
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
                 />
               )}
               {/* 缩略图（半透明叠加在粒子上） */}
-              {isTransitioning && thumbnailLoaded && (
+              {!imageLoaded && thumbnailLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
                   <img
                     key={`${currentPhoto.id}-thumb`}
@@ -654,7 +658,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 className="absolute inset-0 flex items-center justify-center"
                 style={{
                   zIndex: 1,
-                  opacity: displayedUrl ? 1 : 0, // ★ 有 URL 就显示，避免闪屏
+                  opacity: imageLoaded ? 1 : 0,
                   transition: transition === 'pageflip' && isFlipping 
                     ? 'none'
                     : `opacity ${TRANSITION_MS}ms ease`,
@@ -700,13 +704,13 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               )}
             </div>
             <div className="flex-[2] h-full relative">
-              {/* 梦幻粒子效果（切换新图时显示） */}
+              {/* 梦幻粒子效果（原图加载中时显示） */}
               <DreamParticles
                 thumbnailUrl={currentPhoto.thumbnail}
-                visible={isTransitioning}
+                visible={!imageLoaded}
               />
               {/* 缩略图（半透明叠加在粒子上） */}
-              {isTransitioning && thumbnailLoaded && (
+              {!imageLoaded && thumbnailLoaded && (
                 <img
                   key={`${currentPhoto.id}-thumb`}
                   src={currentPhoto.thumbnail}
@@ -723,7 +727,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 className="absolute inset-0 w-full h-full object-contain"
                 style={{
                   zIndex: 2,
-                  opacity: displayedUrl ? 1 : 0, // ★ 有 URL 就显示
+                  opacity: imageLoaded ? 1 : 0,
                   transition: `opacity ${TRANSITION_MS}ms ease`,
                 }}
               />
