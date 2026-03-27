@@ -271,76 +271,96 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
       return;
     }
 
+    let cancelled = false;
+
     const img = new window.Image();
     img.crossOrigin = 'anonymous';
     img.src = thumbnailUrl;
     img.onload = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const parent = canvas.parentElement;
-      if (!parent) return;
+      if (cancelled) return;
 
-      const dpr = window.devicePixelRatio || 1;
-      const cssW = parent.clientWidth || 960;
-      const cssH = parent.clientHeight || 640;
+      // ★ 延迟一帧，确保容器已完成布局
+      requestAnimationFrame(() => {
+        if (cancelled) return;
 
-      // 设置 canvas 物理尺寸
-      canvas.width = cssW * dpr;
-      canvas.height = cssH * dpr;
-      canvas.style.width = cssW + 'px';
-      canvas.style.height = cssH + 'px';
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const parent = canvas.parentElement;
+        if (!parent) return;
 
-      // ★ 关键：计算照片在容器中的实际显示区域（object-contain 语义）
-      const rect = calcContainRect(cssW, cssH, img.naturalWidth, img.naturalHeight);
-      drawRectRef.current = rect;
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = parent.clientWidth;
+        const cssH = parent.clientHeight;
 
-      // 在照片区域内采样颜色
-      const offscreen = document.createElement('canvas');
-      offscreen.width = Math.floor(rect.w);
-      offscreen.height = Math.floor(rect.h);
-      const offCtx = offscreen.getContext('2d');
-      if (!offCtx) return;
-
-      offCtx.drawImage(img, 0, 0, rect.w, rect.h);
-      const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
-
-      const particles: SandParticle[] = [];
-      const step = CONFIG.STEP;
-
-      for (let y = 0; y < offscreen.height && particles.length < CONFIG.MAX_PARTICLES; y += step) {
-        for (let x = 0; x < offscreen.width && particles.length < CONFIG.MAX_PARTICLES; x += step) {
-          const i = (y * offscreen.width + x) * 4;
-          const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-
-          if (a < 60) continue;
-          if (r + g + b < 30 || r + g + b > 730) continue;
-
-          // ★ 粒子坐标 = 照片区域偏移 + 采样位置（转换为物理像素）
-          const px = (rect.x + x) * dpr;
-          const py = (rect.y + y) * dpr;
-
-          particles.push({
-            x: px, y: py,
-            originX: px, originY: py,
-            color: `rgb(${r},${g},${b})`,
-            size: (0.8 + Math.random() * 1.6) * dpr,
-            windSeed: Math.random(),
-            alpha: 0,
-            life: Math.random() * 1200,
-            maxLife: CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS),
-            phase: 'forming',
-            scatterAngle: 0,
-            scatterSpeed: 0,
-          });
+        // 容器尺寸为 0 时跳过（布局未完成）
+        if (cssW < 10 || cssH < 10) {
+          console.warn('🏜️ DreamParticles: container too small, retrying...');
+          setTimeout(() => {
+            if (!cancelled) img.onload?.(new Event('load'));
+          }, 100);
+          return;
         }
-      }
 
-      particlesRef.current = particles;
-      isReadyRef.current = true;
-      startTimeRef.current = performance.now();
-    };
+        // 设置 canvas 物理尺寸（CSS 尺寸由 w-full h-full 控制）
+        canvas.width = Math.round(cssW * dpr);
+        canvas.height = Math.round(cssH * dpr);
+        canvas.style.width = '';
+        canvas.style.height = '';
 
-    return () => { isReadyRef.current = false; };
+        // ★ 计算照片在容器中的实际显示区域（object-contain 语义）
+        const rect = calcContainRect(cssW, cssH, img.naturalWidth, img.naturalHeight);
+        drawRectRef.current = rect;
+
+        console.log(`🏜️ DreamParticles: container=${cssW}x${cssH}, img=${img.naturalWidth}x${img.naturalHeight}, draw=${Math.round(rect.w)}x${Math.round(rect.h)}@(${Math.round(rect.x)},${Math.round(rect.y)})`);
+
+        // 在照片区域内采样颜色
+        const offscreen = document.createElement('canvas');
+        offscreen.width = Math.round(rect.w);
+        offscreen.height = Math.round(rect.h);
+        const offCtx = offscreen.getContext('2d');
+        if (!offCtx) return;
+
+        offCtx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
+        const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
+
+        const particles: SandParticle[] = [];
+        const step = CONFIG.STEP;
+
+        for (let y = 0; y < offscreen.height && particles.length < CONFIG.MAX_PARTICLES; y += step) {
+          for (let x = 0; x < offscreen.width && particles.length < CONFIG.MAX_PARTICLES; x += step) {
+            const i = (y * offscreen.width + x) * 4;
+            const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+
+            if (a < 60) continue;
+            if (r + g + b < 30 || r + g + b > 730) continue;
+
+            // ★ 粒子坐标 = 照片区域偏移 + 采样位置（转换为物理像素）
+            const px = (rect.x + x) * dpr;
+            const py = (rect.y + y) * dpr;
+
+            particles.push({
+              x: px, y: py,
+              originX: px, originY: py,
+              color: `rgb(${r},${g},${b})`,
+              size: (0.8 + Math.random() * 1.6) * dpr,
+              windSeed: Math.random(),
+              alpha: 0,
+              life: Math.random() * 1200,
+              maxLife: CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS),
+              phase: 'forming',
+              scatterAngle: 0,
+              scatterSpeed: 0,
+            });
+          }
+        }
+
+        particlesRef.current = particles;
+        isReadyRef.current = true;
+        startTimeRef.current = performance.now();
+      }); // end requestAnimationFrame
+    }; // end img.onload
+
+    return () => { cancelled = true; isReadyRef.current = false; };
   }, [thumbnailUrl, visible]);
 
   // 动画控制
