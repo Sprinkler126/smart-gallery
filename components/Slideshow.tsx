@@ -5,6 +5,7 @@ import {
   Volume2, VolumeX, Music
 } from 'lucide-react';
 import { Photo } from '../types';
+import DreamParticles from './DreamParticles';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -669,18 +670,25 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
-              {/* Thumbnail placeholder - 模糊缩略图预览（原图加载中时显示） */}
+              {/* 梦幻粒子效果（原图加载中时显示） */}
+              {!imageLoaded && (
+                <DreamParticles
+                  thumbnailUrl={currentPhoto.thumbnail}
+                  visible={true}
+                  width={1920}
+                  height={1080}
+                />
+              )}
+              {/* 缩略图（半透明叠加在粒子上） */}
               {!imageLoaded && thumbnailLoaded && (
-                <div
-                  className="absolute inset-0 flex items-center justify-center z-0"
-                >
+                <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
                   <img
                     key={`${currentPhoto.id}-thumb`}
                     src={currentPhoto.thumbnail}
                     alt={currentPhoto.title}
-                    className="max-w-full max-h-full object-contain select-none blur-sm"
+                    className="max-w-full max-h-full object-contain select-none"
                     draggable={false}
-                    style={{ filter: 'blur(12px)', opacity: 0.7 }}
+                    style={{ filter: 'blur(20px)', opacity: 0.35 }}
                   />
                 </div>
               )}
@@ -736,13 +744,21 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               )}
             </div>
             <div className="flex-[2] h-full relative">
-              {/* 缩略图作为占位（模糊预览） */}
+              {/* 梦幻粒子效果（原图加载中时显示） */}
+              <DreamParticles
+                thumbnailUrl={currentPhoto.thumbnail}
+                visible={!imageLoaded}
+                width={1280}
+                height={960}
+              />
+              {/* 缩略图（半透明叠加在粒子上） */}
               {!imageLoaded && thumbnailLoaded && (
                 <img
                   key={`${currentPhoto.id}-thumb`}
                   src={currentPhoto.thumbnail}
                   alt={currentPhoto.title}
-                  className="absolute inset-0 w-full h-full object-contain blur-sm opacity-80"
+                  className="absolute inset-0 w-full h-full object-contain"
+                  style={{ zIndex: 1, filter: 'blur(20px)', opacity: 0.35 }}
                 />
               )}
               {/* 原图（加载完成后淡入） */}
@@ -750,7 +766,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 key={currentPhoto.id}
                 src={effectiveUrl}
                 alt={currentPhoto.title}
-                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-700 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+                className="absolute inset-0 w-full h-full object-contain"
+                style={{
+                  zIndex: 2,
+                  opacity: imageLoaded ? 1 : 0,
+                  transition: `opacity ${TRANSITION_MS}ms ease`,
+                }}
               />
             </div>
             <div className="flex-1 h-full opacity-30">
