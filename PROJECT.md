@@ -1,6 +1,6 @@
 # SmartGallery 项目文档
 
-> 最后更新：2026-03-27
+> 最后更新：2026-03-27（晚间优化）
 > 维护者：spkleo + sprinkler
 > 本文档供所有后续 AI 开发会话参考，请在每次有重大变更时更新本文档。
 
@@ -178,21 +178,32 @@ npm run build
 
 **Git 提交**：`491cc8c` - "Phase 1: Split Slideshow into memo'd sub-components"
 
-### DreamParticles v3（2026-03-27）✅ 已完成 — 用户验收通过
-**目标**：粒子精确匹配照片位置 + 梦境记忆碎片感
-
-**用户评价**："这是我想要的效果，有梦境、记忆碎片的感觉"
+### DreamParticles v5 + 图片加载优化（2026-03-27 晚间）✅ 已完成
+**目标**：性能优化 + 流畅的图片切换体验
 
 **变更**：
-- **粒子坐标精确匹配 `object-contain` 区域**（核心修复）
-  - `calcContainRect()` 计算照片实际显示位置
-  - 粒子不再填满整个容器，而是精确构成照片画面
-- **FBM 分形噪声风场**（3 层叠加，更自然）
-- **圆形沙粒** + 大小不一
-- **暗角跟随照片区域**（而非容器中心）
-- `STEP=4`, `MAX_PARTICLES=12000`, `FPS=40`
 
-**Git 提交**：`c930c4d` - "🎯 DreamParticles v3: 粒子精确匹配照片 object-contain 区域"
+**1. DreamParticles v5 - 性能优化**
+- `STEP=3`, `MAX_PARTICLES=15000`（降低以提升帧率）
+- `FPS=60`（目标 60fps）
+- **移除复杂噪声函数**（hash/smoothNoise/fbm），改用简单 sin/cos 伪随机
+- **简化动画阶段**：forming/swaying/scattering 计算优化
+- **随机采样**：粒子均匀分布，避免只在上部生成
+
+**2. 图片加载 - 真正异步 + 状态驱动**
+- **并行加载**：缩略图和原图同时加载，不阻塞
+- **三态显示**：
+  - 呼吸光晕（缩略图未加载）
+  - DreamParticles + 模糊缩略图（缩略图已加载）
+  - 高清原图（原图已加载 + 最小显示时间 3s）
+- **最小显示时间**：粒子效果最少显示 3 秒，避免来回跳转
+
+**3. 预加载策略优化**
+- `PRELOAD_AHEAD=3`（减少数量）
+- 优先加载下一张（缩略图高优先级，原图中优先级）
+- 后续图片仅预加载缩略图
+
+**Git 提交**：`90caffe` - "✨ 优化粒子效果：均匀分布 + 切换流畅"
 
 ### DreamParticles v2（2026-03-27）✅ 已完成（已被 v3 替代）
 **变更**（v1 原始版本）：
@@ -217,6 +228,7 @@ npm run build
 - **提交规范**：使用 emoji 前缀（🚀 新功能、🔧 修复、⚡ 优化、📝 文档）
 
 ### 最近提交
+- `90caffe` - ✨ 优化粒子效果：均匀分布 + 切换流畅
 - `491cc8c` - Phase 1: Split Slideshow into memo'd sub-components
 - 之前：DreamParticles 优化
 
@@ -253,7 +265,7 @@ npm run build
 - [ ] PWA 离线访问
 - [ ] Docker 容器化
 - [ ] 微服务架构设计
-- [ ] Phase 2 性能优化
+- [x] Phase 2 性能优化 - ✅ DreamParticles v5 + 异步加载优化已完成
 
 ---
 

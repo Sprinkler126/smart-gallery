@@ -31,55 +31,18 @@ interface DreamParticlesProps {
 }
 
 const CONFIG = {
-  STEP: 2,                // 采样步长：2px（更密集，覆盖更多区域）
-  MAX_PARTICLES: 80000,   // 最大粒子数（增大以覆盖整个照片区域）
-  FPS: 40,
-  FORMING_MS: 1800,
-  SWAY_MIN_MS: 3000,
-  SWAY_MAX_MS: 8000,
-  WIND_SPEED: 0.001,
-  WIND_STRENGTH: 4.0,
+  STEP: 3,                // 采样步长：3px（降低密度，减少粒子数）
+  MAX_PARTICLES: 15000,   // 最大粒子数：降低以提升帧率
+  FPS: 60,                // 目标帧率：60fps
+  FORMING_MS: 1200,       // 形成时间缩短
+  SWAY_MIN_MS: 2000,      // 摆动时间缩短
+  SWAY_MAX_MS: 5000,
+  WIND_SPEED: 0.0008,     // 降低风场计算频率
+  WIND_STRENGTH: 3.0,     // 降低风场强度
 };
 
 /**
- * 2D value noise（简化版）
- */
-function hash(x: number, y: number): number {
-  let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
-  return n - Math.floor(n);
-}
-
-function smoothNoise(x: number, y: number): number {
-  const ix = Math.floor(x), iy = Math.floor(y);
-  const fx = x - ix, fy = y - iy;
-  // smoothstep
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
-  // 四角插值
-  const n00 = hash(ix, iy);
-  const n10 = hash(ix + 1, iy);
-  const n01 = hash(ix, iy + 1);
-  const n11 = hash(ix + 1, iy + 1);
-  const nx0 = n00 + (n10 - n00) * sx;
-  const nx1 = n01 + (n11 - n01) * sx;
-  return nx0 + (nx1 - nx0) * sy;
-}
-
-/**
- * 分形布朗运动噪声（多层叠加）
- */
-function fbm(x: number, y: number, octaves = 3): number {
-  let val = 0, amp = 0.5, freq = 1;
-  for (let i = 0; i < octaves; i++) {
-    val += amp * smoothNoise(x * freq, y * freq);
-    amp *= 0.5;
-    freq *= 2.0;
-  }
-  return val;
-}
-
-/**
- * 计算风场偏移
+ * 简化的风场偏移 - 使用伪随机代替复杂噪声，提升性能
  */
 function windDisplacement(
   originX: number,
@@ -88,18 +51,14 @@ function windDisplacement(
   seed: number
 ): { dx: number; dy: number } {
   const t = time * CONFIG.WIND_SPEED;
-  const scale = 0.006;
-
-  // 两层噪声：主风 + 湍流
-  const n1 = fbm(originX * scale + t * 1.2, originY * scale * 0.8 + seed * 10, 3);
-  const n2 = fbm(originX * scale * 0.5 - t * 0.8, originY * scale + t * 0.6 + seed * 20, 2);
-
-  // 主风向：从左下到右上
-  const baseX = Math.sin(t * 0.4) * 0.5 + 0.4;
-  const baseY = Math.cos(t * 0.25) * 0.3 - 0.2;
-
-  const dx = (n1 * 0.6 + n2 * 0.4 - 0.5 + baseX) * CONFIG.WIND_STRENGTH * 2;
-  const dy = (n1 * 0.4 + n2 * 0.6 - 0.5 + baseY) * CONFIG.WIND_STRENGTH * 1.2;
+  
+  // 伪随机摆动：基于时间和种子生成平滑变化
+  const angle = (originX * 0.01 + originY * 0.007 + t * 0.5 + seed * 6.28) % (Math.PI * 2);
+  const noise = Math.sin(angle) * Math.cos(t * 0.3 + seed * 3.14);
+  
+  // 简化的风场运动
+  const dx = (Math.sin(t * 0.4 + seed * 2) * 0.6 + noise * 0.4) * CONFIG.WIND_STRENGTH;
+  const dy = (Math.cos(t * 0.25 + seed * 1.5) * 0.4 + noise * 0.3 - 0.2) * CONFIG.WIND_STRENGTH * 0.6;
 
   return { dx, dy };
 }
@@ -178,14 +137,13 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
       switch (p.phase) {
         case 'forming': {
           const progress = Math.min(p.life / CONFIG.FORMING_MS, 1);
-          const ease = 1 - Math.pow(1 - progress, 3);
-          // 从边缘飞入
-          const noise = smoothNoise(p.originX * 0.02, p.originY * 0.02);
-          const angle = noise * Math.PI * 2;
-          const dist = 80 + noise * 120;
+          const ease = 1 - (1 - progress) * (1 - progress); // 简化 ease
+          // 从边缘飞入 - 使用伪随机
+          const angle = (p.originX * 0.01 + p.originY * 0.007) % (Math.PI * 2);
+          const dist = 100 * (1 + Math.sin(p.windSeed * 3.14));
           p.x = p.originX + Math.cos(angle) * dist * (1 - ease);
           p.y = p.originY + Math.sin(angle) * dist * (1 - ease);
-          p.alpha = ease * 0.95;
+          p.alpha = ease * 0.9;
           if (p.life >= CONFIG.FORMING_MS) {
             p.phase = 'swaying';
             p.life = 0;
@@ -194,26 +152,29 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
           break;
         }
         case 'swaying': {
-          const wind = windDisplacement(p.originX, p.originY, elapsed, p.windSeed);
-          p.x = p.originX + wind.dx;
-          p.y = p.originY + wind.dy;
-          // 微弱呼吸
-          p.alpha = 0.88 + Math.sin(p.life * 0.003 + p.windSeed * 6.28) * 0.08;
+          // 简化的风场摆动
+          const t = elapsed * 0.0005;
+          const windX = Math.sin(t + p.windSeed * 6.28) * 2;
+          const windY = Math.cos(t * 0.7 + p.windSeed * 4.71) * 1.2;
+          p.x = p.originX + windX;
+          p.y = p.originY + windY;
+          // 微弱呼吸 - 简化计算
+          p.alpha = 0.85 + Math.sin(p.life * 0.002 + p.windSeed * 6.28) * 0.1;
           if (p.life >= p.maxLife) {
             p.phase = 'scattering';
             p.life = 0;
-            p.scatterAngle = -Math.PI / 2 + (Math.random() - 0.5) * 2.5;
-            p.scatterSpeed = 0.3 + Math.random() * 1.0;
+            p.scatterAngle = -Math.PI / 2 + (Math.random() - 0.5) * 1.5;
+            p.scatterSpeed = 0.5 + Math.random() * 0.8;
           }
           break;
         }
         case 'scattering': {
-          const wind = windDisplacement(p.originX, p.originY, elapsed, p.windSeed);
-          p.x += Math.cos(p.scatterAngle) * p.scatterSpeed + wind.dx * 0.04;
-          p.y += Math.sin(p.scatterAngle) * p.scatterSpeed + wind.dy * 0.04;
-          p.scatterSpeed *= 0.994;
-          p.alpha -= 0.006;
-          if (p.alpha <= 0.03) p.phase = 'fading';
+          // 简化散射计算
+          p.x += Math.cos(p.scatterAngle) * p.scatterSpeed;
+          p.y += Math.sin(p.scatterAngle) * p.scatterSpeed - 0.2; // 轻微上升
+          p.scatterSpeed *= 0.98;
+          p.alpha -= 0.008;
+          if (p.alpha <= 0.05) p.phase = 'fading';
           break;
         }
         case 'fading': {

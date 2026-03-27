@@ -72,6 +72,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [showSettings, setShowSettings] = useState(false);
   const [imageLoaded, setImageLoaded]   = useState(false);
   const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
+  const [thumbDisplayReady, setThumbDisplayReady] = useState(false); // ★ 缩略图显示满足最小时间
+  const thumbLoadTimeRef = useRef<number>(0); // ★ 记录缩略图加载完成时间
   const [orientationFilter, setOrientationFilter] = useState<OrientationFilter>('all');
   const [photoOrientations, setPhotoOrientations] = useState<Record<string, 'landscape' | 'portrait' | 'square'>>({});
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
@@ -148,8 +150,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     }
   }, [isRandomOrder, generateShuffledIndices]);
   
-  // ★ 智能预加载：当前照片先缩略图后原图，后面 5 张依次预加载
-  const PRELOAD_AHEAD = 5;
+  // ★ 智能预加载：优先下一张，当前图加载完后再预加载后续
+  const PRELOAD_AHEAD = 3; // 减少预加载数量，优先保证当前和下一张
   const qualityRef = useRef(imageQuality);
   useEffect(() => { qualityRef.current = imageQuality; }, [imageQuality]);
 
@@ -158,32 +160,54 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     if (len <= 1) return;
     const quality = qualityRef.current;
 
-    for (let offset = 1; offset <= PRELOAD_AHEAD; offset++) {
+    // 优先预加载下一张（缩略图 + 原图）
+    const nextIdx = (centerIdx + 1) % len;
+    const nextPhoto = list[nextIdx];
+    if (nextPhoto) {
+      const nextUrl = quality === 'original' && nextPhoto.originalUrl ? nextPhoto.originalUrl : nextPhoto.url;
+      
+      // 下一张缩略图（高优先级）
+      const nextThumbKey = `thumb:${nextUrl}`;
+      if (!preloadedUrls.current.has(nextThumbKey) && nextPhoto.thumbnail) {
+        const tImg = new window.Image();
+        tImg.src = nextPhoto.thumbnail;
+        tImg.onload = () => {
+          preloadedUrls.current.add(nextThumbKey);
+          imageCache.current.set(nextThumbKey, tImg);
+        };
+      }
+      
+      // 下一张原图（中等优先级，延迟一点）
+      const nextFullKey = `full:${nextUrl}`;
+      if (!preloadedUrls.current.has(nextFullKey)) {
+        setTimeout(() => {
+          const fImg = new window.Image();
+          fImg.src = nextUrl;
+          fImg.onload = () => {
+            preloadedUrls.current.add(nextFullKey);
+            imageCache.current.set(nextFullKey, fImg);
+          };
+        }, 500);
+      }
+    }
+
+    // 预加载更后面的（仅缩略图，低优先级）
+    for (let offset = 2; offset <= PRELOAD_AHEAD; offset++) {
       const idx = (centerIdx + offset) % len;
       const photo = list[idx];
       if (!photo) continue;
 
       const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
 
-      // Phase 1: 先加载缩略图（小文件，快速到位）
+      // 只预加载缩略图，不预加载原图（节省带宽）
       const thumbKey = `thumb:${photoUrl}`;
       if (!preloadedUrls.current.has(thumbKey) && photo.thumbnail) {
-        preloadedUrls.current.add(thumbKey);
         const tImg = new window.Image();
         tImg.src = photo.thumbnail;
-        imageCache.current.set(thumbKey, tImg);
-      }
-
-      // Phase 2: 再加载原图（大文件，低优先级不阻塞当前显示）
-      const fullKey = `full:${photoUrl}`;
-      if (!preloadedUrls.current.has(fullKey)) {
-        preloadedUrls.current.add(fullKey);
-        const fImg = new window.Image();
-        // 用 setTimeout 让当前照片优先加载，避免大图抢占带宽
-        setTimeout(() => {
-          fImg.src = photoUrl;
-          imageCache.current.set(fullKey, fImg);
-        }, offset * 100); // 每张延迟 100ms，越远越晚加载
+        tImg.onload = () => {
+          preloadedUrls.current.add(thumbKey);
+          imageCache.current.set(thumbKey, tImg);
+        };
       }
     }
   }, []);
@@ -345,20 +369,24 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   }, [navigate]);
 
   /* ================================================================ */
-  /*  ★ 图片加载：缩略图优先 + 缓存检测 + 渐进切换（保持旧图显示）      */
+  /*  ★ 图片加载：真正异步 + 状态驱动 + 并行加载                        */
   /* ================================================================ */
   useEffect(() => {
     if (!currentPhoto || !effectiveUrl) return;
     let cancelled = false;
 
-    // ★ 切换照片时：保持旧图显示，只标记为新图未加载
-    // 不重置 thumbnailLoaded，让旧缩略图继续显示
+    // ★ 切换照片时：重置加载状态，但保持旧图显示
     setImageLoaded(false);
+    setThumbnailLoaded(false);
 
     const thumbKey = `thumb:${effectiveUrl}`;
     const fullKey = `full:${effectiveUrl}`;
 
-    // ① 两个都已缓存 → 瞬间显示，零等待
+    // 重置最小显示时间状态
+    setThumbDisplayReady(false);
+    thumbLoadTimeRef.current = 0;
+
+    // ① 两个都已缓存 → 瞬间显示
     if (preloadedUrls.current.has(thumbKey) && preloadedUrls.current.has(fullKey)) {
       setThumbnailLoaded(true);
       setDisplayedUrl(effectiveUrl);
@@ -366,54 +394,68 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return;
     }
 
-    // ② 只有缩略图已缓存 → 先显示缩略图，继续加载原图
-    if (preloadedUrls.current.has(thumbKey)) {
-      setThumbnailLoaded(true);
-    }
-
-    // ③ 加载缩略图（如果还没缓存）
+    // ② 并行加载缩略图和原图（真正的异步）
+    
+    // 加载缩略图（独立，不阻塞）
     if (currentPhoto.thumbnail && !preloadedUrls.current.has(thumbKey)) {
       const tImg = new window.Image();
       tImg.src = currentPhoto.thumbnail;
       tImg.onload = () => {
-        if (!cancelled) {
-          preloadedUrls.current.add(thumbKey);
-          imageCache.current.set(thumbKey, tImg);
-          setThumbnailLoaded(true);
-        }
+        if (cancelled) return;
+        preloadedUrls.current.add(thumbKey);
+        imageCache.current.set(thumbKey, tImg);
+        setThumbnailLoaded(true);
+        thumbLoadTimeRef.current = Date.now();
       };
-    } else if (!currentPhoto.thumbnail) {
-      // 没有缩略图，直接标记为已加载（会显示原图加载中）
+      tImg.onerror = () => {
+        // 缩略图失败，直接标记为已加载（会跳过粒子显示）
+        if (!cancelled) setThumbnailLoaded(true);
+      };
+    } else {
+      // 没有缩略图或已缓存
       setThumbnailLoaded(true);
     }
 
-    // ④ 加载原图（延迟 50ms，让缩略图优先获得带宽）
+    // ★ 等待最小显示时间的辅助函数
+    const waitForMinDisplay = (callback: () => void) => {
+      const MIN_DISPLAY_MS = 3000; // 最小 3 秒
+      const elapsed = Date.now() - thumbLoadTimeRef.current;
+      const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
+      
+      setTimeout(() => {
+        if (!cancelled) callback();
+      }, remaining);
+    };
+
+    // 加载原图（独立，不阻塞）
     if (!preloadedUrls.current.has(fullKey)) {
       const fImg = new window.Image();
-      const timer = setTimeout(() => {
+      fImg.src = effectiveUrl;
+      fImg.onload = () => {
         if (cancelled) return;
-        fImg.src = effectiveUrl;
-        fImg.onload = () => {
+        preloadedUrls.current.add(fullKey);
+        imageCache.current.set(fullKey, fImg);
+        // ★ 原图加载完成，但等待最小显示时间
+        waitForMinDisplay(() => {
           if (!cancelled) {
-            preloadedUrls.current.add(fullKey);
-            imageCache.current.set(fullKey, fImg);
-            setDisplayedUrl(effectiveUrl); // ★ 加载完才切换到新图
+            setDisplayedUrl(effectiveUrl);
             setImageLoaded(true);
           }
-        };
-        fImg.onerror = () => {
-          if (!cancelled) {
-            console.warn('⏭️ Image load failed, skipping:', currentPhoto.title);
-            navigate(1);
-          }
-        };
-      }, currentPhoto.thumbnail ? 50 : 0);
-
-      return () => { cancelled = true; clearTimeout(timer); };
+        });
+      };
+      fImg.onerror = () => {
+        if (cancelled) return;
+        console.warn('⏭️ Image load failed, skipping:', currentPhoto.title);
+        navigate(1);
+      };
     } else {
-      // 原图已缓存，直接显示
-      setDisplayedUrl(effectiveUrl);
-      setImageLoaded(true);
+      // 原图已缓存，同样等待最小显示时间
+      waitForMinDisplay(() => {
+        if (!cancelled) {
+          setDisplayedUrl(effectiveUrl);
+          setImageLoaded(true);
+        }
+      });
     }
 
     return () => { cancelled = true; };
@@ -632,8 +674,31 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
+              {/* 加载状态：缩略图也没加载出来时显示呼吸粒子 */}
+              {!imageLoaded && !thumbnailLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
+                  <div className="relative">
+                    {/* 呼吸的光晕效果 */}
+                    <div 
+                      className="w-32 h-32 rounded-full bg-gradient-to-br from-yellow-400/30 to-orange-500/20"
+                      style={{
+                        animation: 'breathe 2s ease-in-out infinite',
+                        filter: 'blur(20px)',
+                      }}
+                    />
+                    {/* 中心点 */}
+                    <div 
+                      className="absolute inset-0 m-auto w-4 h-4 rounded-full bg-yellow-400/60"
+                      style={{
+                        animation: 'breathe 2s ease-in-out infinite 0.3s',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              
               {/* 梦幻粒子效果（原图加载中时显示） */}
-              {!imageLoaded && (
+              {!imageLoaded && thumbnailLoaded && (
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
@@ -962,8 +1027,19 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         onComplete={handleProgressComplete}
       />
       
-      {/* Page Flip Animation Styles */}
+      {/* Animation Styles */}
       <style>{`
+        @keyframes breathe {
+          0%, 100% {
+            transform: scale(0.8);
+            opacity: 0.4;
+          }
+          50% {
+            transform: scale(1.2);
+            opacity: 0.8;
+          }
+        }
+        
         @keyframes pageFlipOutRight {
           0% {
             transform: rotateY(0deg);
