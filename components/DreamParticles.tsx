@@ -1,11 +1,10 @@
 /**
- * DreamParticles v2 - 沙粒构成画面 + 随风摆动
+ * DreamParticles v3 - 粒子精确匹配照片位置
  * 
- * 改进点：
- * - 高分辨率渲染（devicePixelRatio）
- * - 粒子是圆形沙粒，大小不一
- * - 风场模拟：粒子在原位随风摆动，而非单纯消散
- * - 粒子生命周期：构成 → 摆动 → 飘散 → 重生
+ * 核心改进：
+ * - 粒子坐标基于照片的实际显示区域（而非整个容器）
+ * - 使用与 img 相同的 object-contain 逻辑计算绘制区域
+ * - 风场摆动更加自然
  */
 import React, { useEffect, useRef, useCallback, memo } from 'react';
 
@@ -16,15 +15,10 @@ interface SandParticle {
   originY: number;
   color: string;
   size: number;
-  // 风场相关
-  windPhaseX: number;   // 风场相位X（决定摆动节奏）
-  windPhaseY: number;   // 风场相位Y
-  windAmpX: number;     // 摆动幅度X
-  windAmpY: number;     // 摆动幅度Y
-  // 生命周期
+  windSeed: number;       // 随机种子，决定摆动节奏
   alpha: number;
-  life: number;         // 已存活时间(ms)
-  maxLife: number;      // 最大寿命(ms)
+  life: number;
+  maxLife: number;
   phase: 'forming' | 'swaying' | 'scattering' | 'fading';
   scatterAngle: number;
   scatterSpeed: number;
@@ -36,46 +30,109 @@ interface DreamParticlesProps {
 }
 
 const CONFIG = {
-  STEP: 4,                // 采样步长：4px（更密集）
-  MAX_PARTICLES: 15000,   // 最大粒子数
-  FPS: 40,                // 目标帧率
-  // 生命周期
-  FORMING_MS: 2000,       // 构成阶段持续
-  SWAY_MIN_MS: 3000,      // 摆动最短时间
-  SWAY_MAX_MS: 8000,      // 摆动最长时间
-  // 风场
-  WIND_BASE_SPEED: 0.0008, // 风场基础流速
-  WIND_AMPLITUDE: 3.5,     // 最大摆动幅度(px)
-  WIND_TURBULENCE: 0.003,  // 湍流强度
+  STEP: 4,
+  MAX_PARTICLES: 12000,
+  FPS: 40,
+  FORMING_MS: 1800,
+  SWAY_MIN_MS: 3000,
+  SWAY_MAX_MS: 8000,
+  WIND_SPEED: 0.001,
+  WIND_STRENGTH: 4.0,
 };
 
 /**
- * 2D 噪声函数（简化版 Simplex Noise）
- * 用于生成自然的风场
+ * 2D value noise（简化版）
  */
-function noise2D(x: number, y: number): number {
-  const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-  return (n - Math.floor(n)) * 2 - 1;
+function hash(x: number, y: number): number {
+  let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+
+function smoothNoise(x: number, y: number): number {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  // smoothstep
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  // 四角插值
+  const n00 = hash(ix, iy);
+  const n10 = hash(ix + 1, iy);
+  const n01 = hash(ix, iy + 1);
+  const n11 = hash(ix + 1, iy + 1);
+  const nx0 = n00 + (n10 - n00) * sx;
+  const nx1 = n01 + (n11 - n01) * sx;
+  return nx0 + (nx1 - nx0) * sy;
 }
 
 /**
- * 平滑风场噪声
+ * 分形布朗运动噪声（多层叠加）
  */
-function windNoise(x: number, y: number, time: number): { dx: number; dy: number } {
-  const t = time * CONFIG.WIND_BASE_SPEED;
-  // 多层噪声叠加，产生更自然的运动
-  const n1 = noise2D(x * 0.01 + t, y * 0.008);
-  const n2 = noise2D(x * 0.005 - t * 0.7, y * 0.012 + t * 0.3);
-  const n3 = noise2D(x * 0.02 + t * 1.5, y * 0.015 - t * 0.5);
-  
-  // 主风向：从左到右 + 轻微向上
-  const baseWindX = Math.sin(t * 0.5) * 0.6 + 0.3;
-  const baseWindY = Math.cos(t * 0.3) * 0.3 - 0.15;
-  
-  return {
-    dx: (n1 * 0.5 + n2 * 0.3 + n3 * 0.2 + baseWindX) * CONFIG.WIND_AMPLITUDE,
-    dy: (n1 * 0.3 + n2 * 0.5 + n3 * 0.2 + baseWindY) * CONFIG.WIND_AMPLITUDE * 0.6,
-  };
+function fbm(x: number, y: number, octaves = 3): number {
+  let val = 0, amp = 0.5, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * smoothNoise(x * freq, y * freq);
+    amp *= 0.5;
+    freq *= 2.0;
+  }
+  return val;
+}
+
+/**
+ * 计算风场偏移
+ */
+function windDisplacement(
+  originX: number,
+  originY: number,
+  time: number,
+  seed: number
+): { dx: number; dy: number } {
+  const t = time * CONFIG.WIND_SPEED;
+  const scale = 0.006;
+
+  // 两层噪声：主风 + 湍流
+  const n1 = fbm(originX * scale + t * 1.2, originY * scale * 0.8 + seed * 10, 3);
+  const n2 = fbm(originX * scale * 0.5 - t * 0.8, originY * scale + t * 0.6 + seed * 20, 2);
+
+  // 主风向：从左下到右上
+  const baseX = Math.sin(t * 0.4) * 0.5 + 0.4;
+  const baseY = Math.cos(t * 0.25) * 0.3 - 0.2;
+
+  const dx = (n1 * 0.6 + n2 * 0.4 - 0.5 + baseX) * CONFIG.WIND_STRENGTH * 2;
+  const dy = (n1 * 0.4 + n2 * 0.6 - 0.5 + baseY) * CONFIG.WIND_STRENGTH * 1.2;
+
+  return { dx, dy };
+}
+
+/**
+ * 计算 object-contain 的实际绘制区域
+ * 模拟 CSS object-fit: contain 的行为
+ */
+function calcContainRect(
+  containerW: number,
+  containerH: number,
+  contentW: number,
+  contentH: number
+): { x: number; y: number; w: number; h: number } {
+  const containerAspect = containerW / containerH;
+  const contentAspect = contentW / contentH;
+
+  let drawW: number, drawH: number, offsetX: number, offsetY: number;
+
+  if (contentAspect > containerAspect) {
+    // 内容更宽 → 以容器宽度为准
+    drawW = containerW;
+    drawH = containerW / contentAspect;
+    offsetX = 0;
+    offsetY = (containerH - drawH) / 2;
+  } else {
+    // 内容更高 → 以容器高度为准
+    drawH = containerH;
+    drawW = containerH * contentAspect;
+    offsetX = (containerW - drawW) / 2;
+    offsetY = 0;
+  }
+
+  return { x: offsetX, y: offsetY, w: drawW, h: drawH };
 }
 
 function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
@@ -85,10 +142,11 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
   const lastFrameRef = useRef<number>(0);
   const isReadyRef = useRef(false);
   const startTimeRef = useRef<number>(0);
+  // 保存绘制区域信息（用于动画中的坐标偏移）
+  const drawRectRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
 
   /** 动画循环 */
   const animate = useCallback((time: number) => {
-    // FPS 节流
     if (time - lastFrameRef.current < 1000 / CONFIG.FPS) {
       animRef.current = requestAnimationFrame(animate);
       return;
@@ -101,12 +159,8 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const w = canvas.width;
-    const h = canvas.height;
     const dpr = window.devicePixelRatio || 1;
-
-    // 清空（使用物理像素）
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const particles = particlesRef.current;
     if (particles.length === 0 || !isReadyRef.current) {
@@ -115,25 +169,22 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
     }
 
     const elapsed = time - startTimeRef.current;
-
-    // 按颜色分组批量绘制
-    const colorGroups: Map<string, SandParticle[]> = new Map();
+    const colorGroups = new Map<string, SandParticle[]>();
 
     for (const p of particles) {
       p.life += dt;
 
       switch (p.phase) {
         case 'forming': {
-          // 从随机位置飞向原位
           const progress = Math.min(p.life / CONFIG.FORMING_MS, 1);
-          const ease = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-          // 初始偏移（随机方向）
-          const initDx = (noise2D(p.originX * 0.1, p.originY * 0.1) * 100);
-          const initDy = (noise2D(p.originY * 0.1, p.originX * 0.1) * 100);
-          p.x = p.originX + initDx * (1 - ease);
-          p.y = p.originY + initDy * (1 - ease);
-          p.alpha = ease * 0.9;
-
+          const ease = 1 - Math.pow(1 - progress, 3);
+          // 从边缘飞入
+          const noise = smoothNoise(p.originX * 0.02, p.originY * 0.02);
+          const angle = noise * Math.PI * 2;
+          const dist = 80 + noise * 120;
+          p.x = p.originX + Math.cos(angle) * dist * (1 - ease);
+          p.y = p.originY + Math.sin(angle) * dist * (1 - ease);
+          p.alpha = ease * 0.95;
           if (p.life >= CONFIG.FORMING_MS) {
             p.phase = 'swaying';
             p.life = 0;
@@ -141,41 +192,32 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
           }
           break;
         }
-
         case 'swaying': {
-          // 🌬️ 随风摆动 - 核心效果
-          const wind = windNoise(p.originX, p.originY, elapsed);
-          p.x = p.originX + wind.dx * p.windAmpX / CONFIG.WIND_AMPLITUDE;
-          p.y = p.originY + wind.dy * p.windAmpY / CONFIG.WIND_AMPLITUDE;
-          p.alpha = 0.85 + Math.sin(p.life * 0.002 + p.windPhaseX) * 0.1;
-
+          const wind = windDisplacement(p.originX, p.originY, elapsed, p.windSeed);
+          p.x = p.originX + wind.dx;
+          p.y = p.originY + wind.dy;
+          // 微弱呼吸
+          p.alpha = 0.88 + Math.sin(p.life * 0.003 + p.windSeed * 6.28) * 0.08;
           if (p.life >= p.maxLife) {
             p.phase = 'scattering';
             p.life = 0;
-            p.scatterAngle = -Math.PI / 2 + (Math.random() - 0.5) * 2;
-            p.scatterSpeed = 0.4 + Math.random() * 1.2;
+            p.scatterAngle = -Math.PI / 2 + (Math.random() - 0.5) * 2.5;
+            p.scatterSpeed = 0.3 + Math.random() * 1.0;
           }
           break;
         }
-
         case 'scattering': {
-          // 被风吹走
-          const wind = windNoise(p.originX, p.originY, elapsed);
-          p.x += Math.cos(p.scatterAngle) * p.scatterSpeed + wind.dx * 0.05;
-          p.y += Math.sin(p.scatterAngle) * p.scatterSpeed + wind.dy * 0.03;
-          p.scatterSpeed *= 0.993;
-          p.alpha -= 0.008;
-
-          if (p.alpha <= 0.05) {
-            p.phase = 'fading';
-          }
+          const wind = windDisplacement(p.originX, p.originY, elapsed, p.windSeed);
+          p.x += Math.cos(p.scatterAngle) * p.scatterSpeed + wind.dx * 0.04;
+          p.y += Math.sin(p.scatterAngle) * p.scatterSpeed + wind.dy * 0.04;
+          p.scatterSpeed *= 0.994;
+          p.alpha -= 0.006;
+          if (p.alpha <= 0.03) p.phase = 'fading';
           break;
         }
-
         case 'fading': {
           p.alpha = 0;
-          // 重生
-          if (p.life > p.maxLife + 500) {
+          if (p.life > p.maxLife + 800) {
             p.x = p.originX;
             p.y = p.originY;
             p.alpha = 0;
@@ -187,39 +229,37 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
         }
       }
 
-      // 收集可见粒子
       if (p.alpha > 0.01) {
-        if (!colorGroups.has(p.color)) {
-          colorGroups.set(p.color, []);
-        }
+        if (!colorGroups.has(p.color)) colorGroups.set(p.color, []);
         colorGroups.get(p.color)!.push(p);
       }
     }
 
-    // 批量绘制圆形沙粒
+    // 绘制圆形沙粒
     colorGroups.forEach((group, color) => {
       ctx.fillStyle = color;
       for (const p of group) {
         ctx.globalAlpha = Math.max(0, Math.min(1, p.alpha));
-        // 圆形沙粒（arc 比 fillRect 更像沙子）
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
       }
     });
 
-    // 柔化边缘（暗角）
-    const minDim = Math.min(w, h) / dpr;
-    const grad = ctx.createRadialGradient(
-      w / 2, h / 2, minDim * 0.25 * dpr,
-      w / 2, h / 2, minDim * 0.55 * dpr
-    );
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(0.6, 'rgba(0,0,0,0.15)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.7)');
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
+    // 暗角（在照片区域上加）
+    const rect = drawRectRef.current;
+    if (rect.w > 0 && rect.h > 0) {
+      const cx = (rect.x + rect.w / 2) * dpr;
+      const cy = (rect.y + rect.h / 2) * dpr;
+      const r = Math.max(rect.w, rect.h) * 0.5 * dpr;
+      const grad = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 0.75);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.65, 'rgba(0,0,0,0.1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.65)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     animRef.current = requestAnimationFrame(animate);
   }, []);
@@ -237,48 +277,31 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
     img.onload = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-
       const parent = canvas.parentElement;
       if (!parent) return;
 
       const dpr = window.devicePixelRatio || 1;
-      
-      // 提升渲染分辨率
-      const maxSize = 1200;
-      const cssW = Math.min(parent.clientWidth || 960, maxSize);
-      const cssH = Math.min(parent.clientHeight || 640, maxSize);
+      const cssW = parent.clientWidth || 960;
+      const cssH = parent.clientHeight || 640;
 
-      // 物理像素 = CSS 像素 × DPR
+      // 设置 canvas 物理尺寸
       canvas.width = cssW * dpr;
       canvas.height = cssH * dpr;
       canvas.style.width = cssW + 'px';
       canvas.style.height = cssH + 'px';
 
-      // 图片适配
-      const imgAspect = img.width / img.height;
-      const canvasAspect = cssW / cssH;
-      let drawW: number, drawH: number, offsetX: number, offsetY: number;
+      // ★ 关键：计算照片在容器中的实际显示区域（object-contain 语义）
+      const rect = calcContainRect(cssW, cssH, img.naturalWidth, img.naturalHeight);
+      drawRectRef.current = rect;
 
-      if (imgAspect > canvasAspect) {
-        drawW = cssW;
-        drawH = cssW / imgAspect;
-        offsetX = 0;
-        offsetY = (cssH - drawH) / 2;
-      } else {
-        drawH = cssH;
-        drawW = cssH * imgAspect;
-        offsetX = (cssW - drawW) / 2;
-        offsetY = 0;
-      }
-
-      // 采样图片颜色
+      // 在照片区域内采样颜色
       const offscreen = document.createElement('canvas');
-      offscreen.width = Math.floor(drawW);
-      offscreen.height = Math.floor(drawH);
+      offscreen.width = Math.floor(rect.w);
+      offscreen.height = Math.floor(rect.h);
       const offCtx = offscreen.getContext('2d');
       if (!offCtx) return;
 
-      offCtx.drawImage(img, 0, 0, drawW, drawH);
+      offCtx.drawImage(img, 0, 0, rect.w, rect.h);
       const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
 
       const particles: SandParticle[] = [];
@@ -292,23 +315,18 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
           if (a < 60) continue;
           if (r + g + b < 30 || r + g + b > 730) continue;
 
-          // 转换为物理像素坐标
-          const px = (x + offsetX) * dpr;
-          const py = (y + offsetY) * dpr;
+          // ★ 粒子坐标 = 照片区域偏移 + 采样位置（转换为物理像素）
+          const px = (rect.x + x) * dpr;
+          const py = (rect.y + y) * dpr;
 
           particles.push({
-            x: px,
-            y: py,
-            originX: px,
-            originY: py,
+            x: px, y: py,
+            originX: px, originY: py,
             color: `rgb(${r},${g},${b})`,
-            size: (1 + Math.random() * 1.8) * dpr, // 沙粒大小不一
-            windPhaseX: Math.random() * Math.PI * 2,
-            windPhaseY: Math.random() * Math.PI * 2,
-            windAmpX: 0.5 + Math.random() * 1.0,  // 每个粒子摆动幅度不同
-            windAmpY: 0.3 + Math.random() * 0.7,
+            size: (0.8 + Math.random() * 1.6) * dpr,
+            windSeed: Math.random(),
             alpha: 0,
-            life: Math.random() * 1500, // 错开启动
+            life: Math.random() * 1200,
             maxLife: CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS),
             phase: 'forming',
             scatterAngle: 0,
@@ -322,9 +340,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
       startTimeRef.current = performance.now();
     };
 
-    return () => {
-      isReadyRef.current = false;
-    };
+    return () => { isReadyRef.current = false; };
   }, [thumbnailUrl, visible]);
 
   // 动画控制
@@ -348,9 +364,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
       className="absolute inset-0 w-full h-full"
       style={{
         zIndex: 0,
-        borderRadius: '24px',
-        mask: 'radial-gradient(ellipse 85% 85% at center, black 55%, transparent 100%)',
-        WebkitMask: 'radial-gradient(ellipse 85% 85% at center, black 55%, transparent 100%)',
+        pointerEvents: 'none',
       }}
     />
   );
