@@ -1,8 +1,6 @@
-# 📸 Smart Gallery - AI-Powered Photo Gallery
+# 📸 Smart Gallery - AI 智能照片墙
 
-> A beautiful, intelligent photo gallery for photographers. Built with React, TypeScript, and Node.js.
->
-> **Formerly PhotoWall** - Migrated and rebranded for enhanced features and security.
+> 一个美观、智能的照片展示应用，专为摄影爱好者打造。使用 React、TypeScript 和 Node.js 构建。
 
 ![Tech Stack](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript)
@@ -12,104 +10,104 @@
 
 ---
 
-## ✨ Features
+## ✨ 功能特性
 
-### 🎨 Gallery Display
-- **🖼️ Multiple Views**: Masonry, Grid, and Timeline layouts
-- **🎬 Slideshow Mode**: Ken Burns, Page Flip, and Crossfade transitions
-- **🎵 Background Music**: Auto-play BGM with sync to slideshow
-- **📱 Responsive Design**: Perfect on desktop, tablet, and mobile
+### 🎨 照片展示
+- **🖼️ 多种视图**：瀑布流、网格、时间线三种布局
+- **🎬 幻灯片模式**：支持 Ken Burns、翻页、淡入淡出三种切换效果
+- **🎵 背景音乐**：幻灯片播放时同步播放 BGM
+- **📱 响应式设计**：完美适配桌面、平板和手机
 
-### 🤖 AI-Powered Analysis
-- **🏷️ Smart Tagging**: Automatic photo tagging using multimodal LLM
-- **📊 Quality Scoring**: AI evaluates technical and aesthetic quality
-- **🔍 Semantic Search**: Search photos with natural language
-- **📈 Statistics**: View popular tags and category distribution
+### 🤖 AI 智能分析
+- **🏷️ 智能标签**：使用多模态大模型自动为照片打标签
+- **📊 质量评分**：AI 评估照片的技术质量和美学质量
+- **🔍 语义搜索**：用自然语言搜索照片
+- **📈 统计分析**：查看热门标签和分类分布
 
-### 🛡️ Content Protection
-- **🚫 Right-click Protection**: Disable image saving
-- **🚫 Drag Protection**: Prevent image dragging
-- **🚫 Keyboard Shortcuts**: Block Ctrl+S / Cmd+S
-- **💧 Watermark**: Optional copyright overlay
+### 🛡️ 内容保护
+- **🚫 禁用右键**：防止图片被保存
+- **🚫 禁止拖拽**：防止图片被拖动
+- **🚫 快捷键拦截**：拦截 Ctrl+S / Cmd+S 保存快捷键
+- **💧 水印支持**：可选的版权水印覆盖
 
-### 🔧 Management
-- **📁 Multi-source Support**: Local folders, NAS, external drives
-- **⚡ Real-time Updates**: WebSocket live sync
-- **🖼️ Auto Thumbnails**: Sharp-powered thumbnail generation
-- **📊 EXIF Metadata**: Camera info, GPS, date extraction
+### 🔧 管理功能
+- **📁 多源支持**：本地文件夹、NAS、外部硬盘
+- **⚡ 实时更新**：WebSocket 实时同步文件变动
+- **🖼️ 自动缩略图**：使用 Sharp 生成高质量缩略图
+- **📊 EXIF 元数据**：提取相机信息、GPS、拍摄日期
 
 ---
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Prerequisites
+### 环境要求
 - 🟢 Node.js 18+
-- 📦 npm or yarn
+- 📦 npm 或 yarn
 
-### Installation
+### 安装步骤
 
 ```bash
-# 📥 Clone and install
-git clone https://github.com/Sprinkler126/smart-gallery.git
+# 📥 克隆并安装
+git clone https://github.com/你的用户名/smart-gallery.git
 cd smart-gallery
 npm install
 
-# ▶️ Start the server
+# ▶️ 启动服务
 npm start
 
-# 🛠️ Or development mode (with hot reload)
+# 🛠️ 或开发模式（热重载）
 npm run dev
 ```
 
-### 🌐 Access
+### 🌐 访问地址
 
-| Environment | URL |
-|-------------|-----|
-| 🏭 Production | http://localhost:3001 |
-| 🔧 Development | http://localhost:3000 |
-| 🌍 Deployed | https://sprinkler10.xyz |
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-| Technology | Purpose |
-|------------|---------|
-| ⚛️ **React 19** | UI framework with hooks |
-| 📘 **TypeScript** | Type-safe development |
-| ⚡ **Vite 6** | Fast build tool & dev server |
-| 🎨 **Tailwind CSS 4** | Utility-first styling |
-| 🔌 **Socket.IO Client** | Real-time WebSocket |
-| 🎯 **Lucide React** | Beautiful icons |
-
-### Backend
-| Technology | Purpose |
-|------------|---------|
-| 🟢 **Node.js** | Runtime environment |
-| 🚂 **Express.js** | Web framework |
-| 🔌 **Socket.IO** | WebSocket server |
-| 🖼️ **Sharp** | High-performance image processing |
-| 📸 **ExifReader** | EXIF metadata extraction |
-| 🗂️ **Chokidar** | File watching |
-
-### AI Integration
-| Service | Purpose |
-|---------|---------|
-| 🧠 **Multimodal LLM** | Image analysis (Qwen/Claude) |
-| 🔍 **Vector Search** | Semantic photo search |
-| 💾 **Local Caching** | AI results stored locally |
+| 环境 | 地址 |
+|------|-----|
+| 🏭 生产环境 | http://localhost:3001 |
+| 🔧 开发环境 | http://localhost:3000 |
+| 🌍 公网部署 | https://你的域名.com |
 
 ---
 
-## ⚙️ Configuration
+## 🛠️ 技术栈
 
-Edit `server/config.json`:
+### 前端
+| 技术 | 用途 |
+|------|------|
+| ⚛️ **React 19** | UI 框架 |
+| 📘 **TypeScript** | 类型安全开发 |
+| ⚡ **Vite 6** | 快速构建工具 |
+| 🎨 **Tailwind CSS 4** | 原子化 CSS |
+| 🔌 **Socket.IO Client** | WebSocket 客户端 |
+| 🎯 **Lucide React** | 图标库 |
+
+### 后端
+| 技术 | 用途 |
+|------|------|
+| 🟢 **Node.js** | 运行环境 |
+| 🚂 **Express.js** | Web 框架 |
+| 🔌 **Socket.IO** | WebSocket 服务 |
+| 🖼️ **Sharp** | 高性能图片处理 |
+| 📸 **ExifReader** | EXIF 元数据提取 |
+| ️️ **Chokidar** | 文件监听 |
+
+### AI 集成
+| 服务 | 用途 |
+|------|------|
+| 🧠 **多模态大模型** | 图片分析（通义千问/Claude） |
+| 🔍 **向量搜索** | 语义照片搜索 |
+| 💾 **本地缓存** | AI 结果本地存储 |
+
+---
+
+## ⚙️ 配置说明
+
+编辑 `server/config.json`：
 
 ```json
 {
-  "appName": "SPRINKLER",
-  "photographerName": "Your Name",
+  "appName": "你的应用名称",
+  "photographerName": "摄影师名称",
   "server": {
     "port": 3001,
     "host": "0.0.0.0"
@@ -117,7 +115,7 @@ Edit `server/config.json`:
   "imageSources": [
     {
       "id": "local-photos",
-      "name": "📁 Local Photos",
+      "name": "📁 本地照片",
       "type": "local",
       "path": "./public/photos",
       "enabled": true,
@@ -136,150 +134,141 @@ Edit `server/config.json`:
 
 ---
 
-## 🎮 Slideshow Controls
+## 🎮 幻灯片快捷键
 
-| Key | Action |
-|-----|--------|
-| ␣ **Space** | Play / Pause |
-| ← **Arrow Left** | Previous photo |
-| → **Arrow Right** | Next photo |
-| **T** | Toggle transition effect |
-| **R** | Toggle random / sequential order |
-| **M** | Toggle music mute |
-| **S** | Open settings |
-| **F** | Fullscreen |
-| **ESC** | Exit / Close |
+| 按键 | 功能 |
+|-----|------|
+| ␣ **空格** | 播放 / 暂停 |
+| ← **左方向键** | 上一张 |
+| → **右方向键** | 下一张 |
+| **T** | 切换切换效果 |
+| **R** | 切换随机/顺序播放 |
+| **M** | 静音/取消静音 |
+| **S** | 打开设置 |
+| **F** | 全屏 |
+| **ESC** | 退出/关闭 |
 
 ---
 
-## 🌟 Key Features Explained
+## 🌟 核心功能详解
 
-### 🎬 Slideshow Transitions
+### 🎬 幻灯片切换效果
 
-| Effect | Description |
-|--------|-------------|
-| ✨ **Crossfade** | Smooth fade between photos |
-| 🎥 **Ken Burns** | Subtle pan and zoom (4-6%) |
-| 📖 **Page Flip** | 3D book-like page turning |
-| 🎵 **BGM Sync** | Music pauses/resumes with slideshow |
+| 效果 | 描述 |
+|------|------|
+| ✨ **淡入淡出** | 平滑的淡入淡出过渡 |
+| 🎥 **Ken Burns** | 轻微的平移和缩放（4-6%） |
+| 📖 **翻页** | 3D 书本翻页效果 |
+| 🎵 **BGM 同步** | 音乐随幻灯片暂停/播放同步控制 |
 
-### 🤖 AI Analysis
+### 🤖 AI 分析示例
 
 ```javascript
-// AI analyzes each photo for:
+// AI 分析每张照片：
 {
-  "tags": ["sunset", "ocean", "silhouette"],
-  "category": "Nature",
-  "description": "Golden sunset over calm ocean...",
+  "tags": ["日落", "海洋", "剪影"],
+  "category": "自然",
+  "description": "金色夕阳下的平静海面...",
   "quality": { "score": 8, "issues": [] },
-  "aesthetic": { "score": 9, "strengths": ["composition", "color"] }
+  "aesthetic": { "score": 9, "strengths": ["构图", "色彩"] }
 }
 ```
 
-### 🔍 Semantic Search
+### 🔍 语义搜索
 
-Search naturally:
-- "🌅 sunset photos"
-- "🏔️ mountains with snow"
-- "👨‍👩‍👧 family portraits"
+自然语言搜索：
+- "🌅 日落照片"
+- "🏔️ 雪山风景"
+- "👨‍👩‍👧 家庭合影"
 
 ---
 
-## 📁 Project Structure
+## 📁 项目结构
 
 ```
-PhotoWall/
-├── 📂 server/                 # 🟢 Backend
-│   ├── 📄 index.js           # Express entry
-│   ├── 📄 config.json        # ⚙️ Configuration
+smart-gallery/
+├── 📂 server/                 # 🟢 后端
+│   ├── 📄 index.js           # Express 入口
+│   ├── 📄 config.json        # ⚙️ 配置文件
 │   ├── 📂 routes/
-│   │   └── 📄 api.js         # 🛣️ API endpoints
+│   │   └── 📄 api.js         # 🛣️ API 接口
 │   ├── 📂 services/
-│   │   ├── 📄 aiAnalysisService.js   # 🤖 AI analysis
-│   │   ├── 📄 galleryService.js      # 📊 Gallery logic
-│   │   ├── 📄 imageProcessor.js      # 🖼️ Image processing
-│   │   └── 📄 vectorSearchService.js # 🔍 Semantic search
-│   └── 📂 cache/             # 💾 Thumbnails & AI cache
+│   │   ├── 📄 aiAnalysisService.js   # 🤖 AI 分析
+│   │   ├── 📄 galleryService.js      # 📊 相册逻辑
+│   │   ├── 📄 imageProcessor.js      # 🖼️ 图片处理
+│   │   └── 📄 vectorSearchService.js # 🔍 语义搜索
+│   └── 📂 cache/             # 💾 缩略图和 AI 缓存
 │       ├── 📂 thumbnails/
 │       ├── 📂 analysis/
 │       └── 📂 vectors/
-├── 📂 components/            # ⚛️ React components
-│   ├── 📄 Slideshow.tsx      # 🎬 Slideshow with effects
-│   ├── 📄 Lightbox.tsx       # 🔍 Image viewer
-│   ├── 📄 AIAnalysisPanel.tsx # 🤖 AI stats panel
-│   ├── 📄 AdminPanel.tsx     # ⚙️ Settings UI
-│   └── 📄 ProtectedImage.tsx # 🛡️ Protected image
+├── 📂 components/            # ⚛️ React 组件
+│   ├── 📄 Slideshow.tsx      # 🎬 幻灯片（含特效）
+│   ├── 📄 Lightbox.tsx       # 🔍 图片查看器
+│   ├── 📄 AIAnalysisPanel.tsx # 🤖 AI 统计面板
+│   ├── 📄 AdminPanel.tsx     # ⚙️ 设置界面
+│   └── 📄 ProtectedImage.tsx # 🛡️ 受保护图片
 ├── 📂 hooks/
-│   └── 📄 useGallery.ts      # 🎣 Gallery state hook
-├── 📄 App.tsx               # 🏠 Main app
-├── 📄 index.html            # 📄 HTML template
-└── 📄 package.json          # 📦 Dependencies
+│   └── 📄 useGallery.ts      # 🎣 Gallery 状态钩子
+├── 📄 App.tsx               # 🏠 主应用
+├── 📄 index.html            # 📄 HTML 模板
+└── 📄 package.json          # 📦 依赖配置
 ```
 
 ---
 
-## 🚀 Deployment
+## 🚀 部署指南
 
-### Build for Production
+### 生产构建
 
 ```bash
-# 🏗️ Build frontend
+# 🏗️ 构建前端
 npm run build
 
-# ▶️ Start production server
+# ▶️ 启动生产服务
 npm start
 ```
 
-### Cloudflare Tunnel (Recommended)
+### Cloudflare Tunnel（推荐）
 
 ```bash
-# 🌐 Expose local server to internet
-cloudflared tunnel run photowall
+# 🌐 将本地服务暴露到公网
+cloudflared tunnel run your-tunnel-name
 ```
 
-### Environment Variables
+### 环境变量
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | 3001 |
-| `AI_API_ENDPOINT` | AI service URL | - |
-| `AI_API_KEY` | AI service key | - |
-
----
-
-## 🐛 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| 🖼️ Images not loading | Check path permissions & formats |
-| 🎞️ Thumbnails failing | Verify Sharp installation |
-| 🔌 WebSocket errors | Check CORS configuration |
-| 🤖 AI not working | Verify API key and endpoint |
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `PORT` | 服务端口 | 3001 |
+| `AI_API_ENDPOINT` | AI 服务地址 | - |
+| `AI_API_KEY` | AI 服务密钥 | - |
 
 ---
 
-## 📝 License
+## 🐛 常见问题
 
-MIT © [Sprinkler](https://github.com/Sprinkler126)
-
----
-
-## 🔄 Migration Note
-
-This project was formerly known as **PhotoWall**. It has been migrated to **smart-gallery** with:
-- ✅ New private repository for enhanced security
-- ✅ Updated branding and documentation
-- ✅ All features preserved and improved
+| 问题 | 解决方案 |
+|------|----------|
+| 🖼️ 图片无法加载 | 检查路径权限和格式支持 |
+| 🎞️ 缩略图生成失败 | 确认 Sharp 安装正确 |
+| 🔌 WebSocket 错误 | 检查 CORS 配置 |
+| 🤖 AI 无法使用 | 验证 API 密钥和端点地址 |
 
 ---
 
-## 🙏 Credits
+## 📝 开源协议
 
-- 🎨 UI inspired by minimal photography portfolios
-- 🖼️ Image processing powered by [Sharp](https://sharp.pixelplumbing.com/)
-- 🔌 Real-time sync via [Socket.IO](https://socket.io/)
-- 🎨 Styling with [Tailwind CSS](https://tailwindcss.com/)
+MIT © [你的用户名](https://github.com/你的用户名)
 
 ---
 
-> 📸 **Happy Photography!** Built with ❤️ for photographers who love their craft.
+## 🙏 致谢
+
+- 🎨 UI 设计灵感来自极简摄影作品集
+- 🖼️ 图片处理由 [Sharp](https://sharp.pixelplumbing.com/) 提供支持
+- 🔌 实时同步使用 [Socket.IO](https://socket.io/)
+- 🎨 样式基于 [Tailwind CSS](https://tailwindcss.com/)
+
+---
+
+> 📸 **享受摄影的乐趣！** 用 ❤️ 为热爱摄影的人打造。
