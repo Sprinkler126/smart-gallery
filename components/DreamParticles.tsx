@@ -30,8 +30,8 @@ interface DreamParticlesProps {
 }
 
 const CONFIG = {
-  STEP: 4,
-  MAX_PARTICLES: 12000,
+  STEP: 3,                // 采样步长：3px（更密集）
+  MAX_PARTICLES: 30000,   // 最大粒子数（覆盖全画面）
   FPS: 40,
   FORMING_MS: 1800,
   SWAY_MIN_MS: 3000,
