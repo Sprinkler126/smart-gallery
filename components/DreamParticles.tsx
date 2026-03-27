@@ -1,21 +1,21 @@
 /**
- * DreamParticles - 沙粒消散效果
+ * DreamParticles - 沙粒消散效果（优化版）
  * 粒子构成照片，逐渐飘散消逝，如梦境回忆般
  */
 import { useEffect, useRef, useCallback } from 'react';
 
 interface SandParticle {
-  x: number;        // 当前位置
+  x: number;
   y: number;
-  originX: number;  // 原始位置（照片中的位置）
+  originX: number;
   originY: number;
   color: string;
   size: number;
-  vx: number;       // 漂移速度
+  vx: number;
   vy: number;
   alpha: number;
-  scattered: boolean; // 是否已散开
-  scatterTime: number; // 何时开始散开
+  scattered: boolean;
+  scatterTime: number;
   life: number;
 }
 
@@ -24,66 +24,32 @@ interface DreamParticlesProps {
   visible: boolean;
 }
 
+// 性能优化配置
+const CONFIG = {
+  STEP: 6,              // 采样步长：6px 一个粒子（减少数量）
+  MAX_PARTICLES: 8000,  // 最大粒子数限制
+  FPS: 30,              // 目标帧率
+  FADE_START: 1000,     // 散开后多久开始淡出
+  FADE_SPEED: 0.015,    // 淡出速度
+};
+
 export default function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<SandParticle[]>([]);
   const animRef = useRef<number>(0);
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const colorsRef = useRef<string[]>([]);
+  const lastFrameRef = useRef<number>(0);
+  const gradientRef = useRef<CanvasGradient | null>(null);
+  const isReadyRef = useRef(false);
 
-  /** 从缩略图采样粒子 */
-  const sampleParticles = useCallback((img: HTMLImageElement, w: number, h: number): SandParticle[] => {
-    const offscreen = document.createElement('canvas');
-    offscreen.width = w;
-    offscreen.height = h;
-    const ctx = offscreen.getContext('2d');
-    if (!ctx) return [];
-
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
-
-    const particles: SandParticle[] = [];
-    const step = 4; // 每 4px 采样一个粒子
-    const colors: string[] = [];
-
-    for (let y = 0; y < h; y += step) {
-      for (let x = 0; x < w; x += step) {
-        const i = (y * w + x) * 4;
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const a = data[i + 3];
-
-        if (a < 50) continue; // 跳过透明像素
-
-        const color = `rgb(${r},${g},${b})`;
-        colors.push(color);
-
-        // 随机延迟散开时间（2-8秒后开始消散）
-        const scatterDelay = 2000 + Math.random() * 6000;
-
-        particles.push({
-          x, y,
-          originX: x,
-          originY: y,
-          color,
-          size: 1.5 + Math.random() * 1.5,
-          vx: (Math.random() - 0.5) * 0.3,
-          vy: -0.1 - Math.random() * 0.4, // 主要向上飘
-          alpha: 1,
-          scattered: false,
-          scatterTime: scatterDelay,
-          life: 0,
-        });
-      }
-    }
-
-    colorsRef.current = [...new Set(colors)].slice(0, 20);
-    return particles;
-  }, []);
-
-  /** 动画循环 */
+  /** 动画循环（优化版） */
   const animate = useCallback((time: number) => {
+    // FPS 节流
+    if (time - lastFrameRef.current < 1000 / CONFIG.FPS) {
+      animRef.current = requestAnimationFrame(animate);
+      return;
+    }
+    lastFrameRef.current = time;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -96,112 +62,118 @@ export default function DreamParticles({ thumbnailUrl, visible }: DreamParticles
     ctx.clearRect(0, 0, w, h);
 
     const particles = particlesRef.current;
-    if (particles.length === 0) {
+    if (particles.length === 0 || !isReadyRef.current) {
       animRef.current = requestAnimationFrame(animate);
       return;
     }
 
-    // 绘制每个粒子
+    // 批量绘制：先按颜色分组，减少状态切换
+    const colorGroups: Map<string, SandParticle[]> = new Map();
+
+    // 更新粒子状态
     for (const p of particles) {
-      p.life += 16;
+      p.life += 33; // 约 30fps
 
       if (!p.scattered) {
-        // 还在照片位置，轻微抖动（沙粒呼吸感）
-        p.x = p.originX + Math.sin(p.life * 0.003 + p.originX * 0.1) * 0.5;
-        p.y = p.originY + Math.cos(p.life * 0.004 + p.originY * 0.1) * 0.3;
+        // 呼吸抖动（简化计算）
+        p.x = p.originX + Math.sin(p.life * 0.002) * 0.3;
+        p.y = p.originY + Math.cos(p.life * 0.002) * 0.2;
 
-        // 到了散开时间
         if (p.life > p.scatterTime) {
           p.scattered = true;
-          // 给一个随机的散开速度
-          const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.8; // 主要向上
-          const speed = 0.3 + Math.random() * 1.2;
+          const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.5;
+          const speed = 0.5 + Math.random() * 1.0;
           p.vx = Math.cos(angle) * speed;
           p.vy = Math.sin(angle) * speed;
         }
       } else {
-        // 散开中：缓慢飘走，逐渐减速
+        // 散开中
         p.x += p.vx;
         p.y += p.vy;
-        p.vx *= 0.998; // 轻微阻力
-        p.vy *= 0.998;
+        p.vx *= 0.995;
+        p.vy *= 0.995;
 
-        // 添加微风扰动
-        p.vx += Math.sin(p.life * 0.001 + p.originY * 0.01) * 0.02;
-        p.vy += Math.cos(p.life * 0.0015 + p.originX * 0.01) * 0.01;
+        // 简化扰动
+        p.vx += Math.sin(p.life * 0.0005) * 0.01;
 
         // 渐隐
         const scatterElapsed = p.life - p.scatterTime;
-        const fadeStart = 1500; // 散开后 1.5 秒开始淡出
-        if (scatterElapsed > fadeStart) {
-          p.alpha -= 0.008;
+        if (scatterElapsed > CONFIG.FADE_START) {
+          p.alpha -= CONFIG.FADE_SPEED;
         }
       }
 
-      // 死亡 → 重生在原位
+      // 重生
       if (p.alpha <= 0) {
         p.x = p.originX;
         p.y = p.originY;
         p.alpha = 1;
         p.scattered = false;
         p.life = 0;
-        p.scatterTime = 2000 + Math.random() * 6000;
-        p.vx = (Math.random() - 0.5) * 0.3;
-        p.vy = -0.1 - Math.random() * 0.4;
+        p.scatterTime = 1500 + Math.random() * 5000;
         continue;
       }
 
-      // 绘制（圆角矩形 + 辉光，更梦幻）
-      ctx.globalAlpha = Math.max(0, Math.min(1, p.alpha));
-      ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = p.scattered ? p.size * 2 : 1;
-      const s = p.size;
-      const r = s * 0.4;
-      ctx.beginPath();
-      ctx.roundRect(p.x - s / 2, p.y - s / 2, s, s, r);
-      ctx.fill();
-      ctx.shadowBlur = 0;
+      // 按颜色分组
+      if (!colorGroups.has(p.color)) {
+        colorGroups.set(p.color, []);
+      }
+      colorGroups.get(p.color)!.push(p);
     }
 
+    // 批量绘制（每颜色只设置一次 fillStyle）
     ctx.globalAlpha = 1;
+    for (const [color, group] of colorGroups) {
+      ctx.fillStyle = color;
+      for (const p of group) {
+        ctx.globalAlpha = Math.max(0, p.alpha * 0.9);
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      }
+    }
 
-    // 边缘柔化渐变（梦境感）
-    const gradient = ctx.createRadialGradient(
-      w / 2, h / 2, Math.min(w, h) * 0.25,
-      w / 2, h / 2, Math.min(w, h) * 0.55
-    );
-    gradient.addColorStop(0, 'rgba(0,0,0,0)');
-    gradient.addColorStop(0.6, 'rgba(0,0,0,0.15)');
-    gradient.addColorStop(0.85, 'rgba(0,0,0,0.5)');
-    gradient.addColorStop(1, 'rgba(0,0,0,0.92)');
-    ctx.fillStyle = gradient;
+    // 边缘柔化（使用缓存的渐变）
+    if (!gradientRef.current) {
+      gradientRef.current = ctx.createRadialGradient(
+        w / 2, h / 2, Math.min(w, h) * 0.3,
+        w / 2, h / 2, Math.min(w, h) * 0.6
+      );
+      gradientRef.current.addColorStop(0, 'rgba(0,0,0,0)');
+      gradientRef.current.addColorStop(0.7, 'rgba(0,0,0,0.2)');
+      gradientRef.current.addColorStop(1, 'rgba(0,0,0,0.85)');
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = gradientRef.current;
     ctx.fillRect(0, 0, w, h);
 
     animRef.current = requestAnimationFrame(animate);
   }, []);
+
+  // 初始化粒子
   useEffect(() => {
-    if (!thumbnailUrl || !visible) return;
+    if (!thumbnailUrl || !visible) {
+      isReadyRef.current = false;
+      return;
+    }
 
     const img = new window.Image();
     img.crossOrigin = 'anonymous';
     img.src = thumbnailUrl;
     img.onload = () => {
-      imageRef.current = img;
-
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      // 获取容器尺寸
       const parent = canvas.parentElement;
       if (!parent) return;
-      const w = parent.clientWidth || 960;
-      const h = parent.clientHeight || 640;
+
+      // 限制 canvas 尺寸，降低计算量
+      const maxSize = 800;
+      let w = Math.min(parent.clientWidth || 960, maxSize);
+      let h = Math.min(parent.clientHeight || 640, maxSize);
 
       canvas.width = w;
       canvas.height = h;
 
-      // 计算图片缩放后在 canvas 中的绘制区域
+      // 计算图片绘制区域
       const imgAspect = img.width / img.height;
       const canvasAspect = w / h;
       let drawW: number, drawH: number, offsetX: number, offsetY: number;
@@ -219,7 +191,6 @@ export default function DreamParticles({ thumbnailUrl, visible }: DreamParticles
       }
 
       // 采样粒子
-      const particles: SandParticle[] = [];
       const offscreen = document.createElement('canvas');
       offscreen.width = Math.floor(drawW);
       offscreen.height = Math.floor(drawH);
@@ -229,35 +200,41 @@ export default function DreamParticles({ thumbnailUrl, visible }: DreamParticles
       offCtx.drawImage(img, 0, 0, drawW, drawH);
       const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
 
-      const step = 3; // 每 3px 一个粒子
-      for (let y = 0; y < offscreen.height; y += step) {
-        for (let x = 0; x < offscreen.width; x += step) {
+      const particles: SandParticle[] = [];
+      const step = CONFIG.STEP;
+
+      for (let y = 0; y < offscreen.height && particles.length < CONFIG.MAX_PARTICLES; y += step) {
+        for (let x = 0; x < offscreen.width && particles.length < CONFIG.MAX_PARTICLES; x += step) {
           const i = (y * offscreen.width + x) * 4;
           const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-          if (a < 50) continue;
 
-          // 跳过全黑/全白像素（通常是边框）
-          if (r + g + b < 30 || r + g + b > 740) continue;
+          if (a < 60) continue;
+          if (r + g + b < 40 || r + g + b > 720) continue;
 
-          const scatterDelay = 1500 + Math.random() * 7000;
           particles.push({
             x: x + offsetX,
             y: y + offsetY,
             originX: x + offsetX,
             originY: y + offsetY,
             color: `rgb(${r},${g},${b})`,
-            size: 1.0 + Math.random() * 2.5,
-            vx: (Math.random() - 0.5) * 0.3,
-            vy: -0.1 - Math.random() * 0.5,
-            alpha: 1,
+            size: 1.5 + Math.random() * 1.5,
+            vx: (Math.random() - 0.5) * 0.2,
+            vy: -0.1 - Math.random() * 0.3,
+            alpha: 0.8 + Math.random() * 0.2,
             scattered: false,
-            scatterTime: scatterDelay,
-            life: Math.random() * 2000, // 错开启动时间
+            scatterTime: 1000 + Math.random() * 4000,
+            life: Math.random() * 1000,
           });
         }
       }
 
       particlesRef.current = particles;
+      gradientRef.current = null; // 重置渐变缓存
+      isReadyRef.current = true;
+    };
+
+    return () => {
+      isReadyRef.current = false;
     };
   }, [thumbnailUrl, visible]);
 
@@ -266,8 +243,10 @@ export default function DreamParticles({ thumbnailUrl, visible }: DreamParticles
     if (!visible) {
       cancelAnimationFrame(animRef.current);
       particlesRef.current = [];
+      isReadyRef.current = false;
       return;
     }
+    lastFrameRef.current = 0;
     animRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animRef.current);
   }, [visible, animate]);
