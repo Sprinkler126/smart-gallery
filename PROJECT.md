@@ -175,8 +175,23 @@ npm run build
 
 **Git 提交**：`491cc8c` - "Phase 1: Split Slideshow into memo'd sub-components"
 
-### DreamParticles 优化（2026-03-27）✅ 已完成
+### DreamParticles v2（2026-03-27）✅ 已完成
+**目标**：沙粒构成画面 + 随风摆动 + 高分辨率
+
 **变更**：
+- `STEP=4`（更密集的粒子采样，更清晰的画面）
+- `MAX_PARTICLES=15000`（更多粒子，更好的画面细节）
+- `FPS=40`（更流畅的动画）
+- `maxSize=1200`（更大的画布尺寸）
+- **devicePixelRatio 支持**：Retina 屏幕显示清晰
+- **风场模拟**：2D 噪声生成自然风场，粒子随风摆动
+- **圆形沙粒**：`arc()` 替代 `fillRect()`，更像真实沙子
+- **生命周期优化**：构成 → 摆动 → 飘散 → 重生，过渡更自然
+
+**Git 提交**：`66ec87e` - "🌬️ DreamParticles v2: 风场摆动 + 高分辨率 + 圆形沙粒"
+
+### DreamParticles v1（2026-03-27）✅ 已完成（已被 v2 替代）
+**变更**（v1 原始版本）：
 - `STEP=6`（每 6 像素采样一次）
 - `MAX_PARTICLES=8000`
 - `FPS=30` 节流
