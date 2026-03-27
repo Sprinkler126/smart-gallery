@@ -76,6 +76,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [photoOrientations, setPhotoOrientations] = useState<Record<string, 'landscape' | 'portrait' | 'square'>>({});
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
   const [isLoading, setIsLoading]       = useState(true);
+  const [displayedUrl, setDisplayedUrl] = useState(''); // ★ 加载完成后才放上 img 标签
   const [transition, setTransition]     = useState<TransitionType>('kenburns');
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
@@ -325,6 +326,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }
     });
     setImageLoaded(false);
+    setDisplayedUrl(''); // ★ 切换照片时清空
 
     // 清除上一次的 prevIndex 清理定时器
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
@@ -390,6 +392,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           if (!cancelled) {
             preloadedUrls.current.add(fullKey);
             imageCache.current.set(fullKey, fImg);
+            setDisplayedUrl(effectiveUrl); // ★ 加载完才设置显示 URL
             setImageLoaded(true);
           }
         };
@@ -403,7 +406,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
       return () => { cancelled = true; clearTimeout(timer); };
     } else {
-      // 原图已缓存但缩略图可能还没标记
+      // 原图已缓存，直接显示
+      setDisplayedUrl(effectiveUrl);
       setImageLoaded(true);
     }
 
@@ -673,7 +677,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 >
                   <img
                     key={currentPhoto.id}
-                    src={effectiveUrl}
+                    src={displayedUrl}
                     alt={currentPhoto.title}
                     className="max-w-full max-h-full object-contain select-none"
                     draggable={false}
@@ -710,10 +714,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   style={{ zIndex: 1, filter: 'blur(20px)', opacity: 0.35 }}
                 />
               )}
-              {/* 原图（加载完成后淡入） */}
+              {/* 原图（加载完成后才设置 src，避免渐进式渲染） */}
               <img
                 key={currentPhoto.id}
-                src={effectiveUrl}
+                src={displayedUrl}
                 alt={currentPhoto.title}
                 className="absolute inset-0 w-full h-full object-contain"
                 style={{
