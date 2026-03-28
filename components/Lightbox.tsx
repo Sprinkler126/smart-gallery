@@ -292,10 +292,23 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
             transformOrigin: 'center center',
           }}
         >
-          {/* Loading Placeholder */}
+          {/* Loading Placeholder - Elegant Cinematic Loader */}
           {!imageLoaded && !imageError && (
-            <div className="flex items-center justify-center w-[60vw] h-[60vh] bg-charcoal/50 rounded-lg">
-              <div className="animate-pulse text-gray-500">Loading...</div>
+            <div className="flex flex-col items-center justify-center w-[60vw] h-[60vh]">
+              <div className="relative">
+                <div className="w-24 h-24 rounded-full border border-gold/20 animate-spin" style={{ animationDuration: '3s' }} />
+                <div className="absolute inset-2 rounded-full border border-gold/30 animate-spin" style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gold/40 to-amber-600/30 animate-pulse" />
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-3 h-3 rounded-full bg-gold animate-ping" style={{ animationDuration: '2s' }} />
+                </div>
+              </div>
+              <div className="mt-8 text-center">
+                <p className="text-white/60 text-sm tracking-[0.3em] uppercase font-light animate-pulse">Loading</p>
+                <p className="text-gold/80 text-xs mt-2 font-serif italic">{photo.title}</p>
+              </div>
             </div>
           )}
 

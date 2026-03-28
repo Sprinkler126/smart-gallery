@@ -28,18 +28,44 @@ interface SandParticle {
 interface DreamParticlesProps {
   thumbnailUrl: string;
   visible: boolean;
+  particleCount?: number; // 粒子数量等级：1-10，默认5
 }
 
-const CONFIG = {
-  STEP: 3,                // 采样步长：3px（降低密度，减少粒子数）
-  MAX_PARTICLES: 15000,   // 最大粒子数：降低以提升帧率
+// 基础配置（粒子数量可调节）
+const BASE_CONFIG = {
+  STEP: 3,                // 采样步长：3px
   FPS: 60,                // 目标帧率：60fps
-  FORMING_MS: 1200,       // 形成时间缩短
-  SWAY_MIN_MS: 2000,      // 摆动时间缩短
-  SWAY_MAX_MS: 5000,
-  WIND_SPEED: 0.0008,     // 降低风场计算频率
-  WIND_STRENGTH: 3.0,     // 降低风场强度
+  FORMING_MS: 1200,       // 形成时间
+  SWAY_MIN_MS: 2000,      // 最小摆动时间
+  SWAY_MAX_MS: 5000,      // 最大摆动时间
+  WIND_SPEED: 0.0008,     // 风场速度
+  WIND_STRENGTH: 3.0,     // 风场强度
 };
+
+// 粒子数量配置映射（1-10级）
+const PARTICLE_LEVELS = [
+  { step: 8, max: 2000 },    // 1 - 极少
+  { step: 6, max: 4000 },    // 2 - 很少
+  { step: 5, max: 6000 },    // 3 - 少
+  { step: 4, max: 8000 },    // 4 - 较少
+  { step: 3, max: 12000 },   // 5 - 中等（默认）
+  { step: 3, max: 15000 },   // 6 - 较多
+  { step: 2, max: 20000 },   // 7 - 多
+  { step: 2, max: 30000 },   // 8 - 很多
+  { step: 2, max: 45000 },   // 9 - 极多
+  { step: 1, max: 60000 },   // 10 - 密集
+];
+
+// 获取配置
+function getConfig(particleLevel: number = 5) {
+  const level = Math.max(1, Math.min(10, particleLevel));
+  const settings = PARTICLE_LEVELS[level - 1];
+  return {
+    ...BASE_CONFIG,
+    STEP: settings.step,
+    MAX_PARTICLES: settings.max,
+  };
+}
 
 /**
  * 简化的风场偏移 - 使用伪随机代替复杂噪声，提升性能
@@ -48,17 +74,18 @@ function windDisplacement(
   originX: number,
   originY: number,
   time: number,
-  seed: number
+  seed: number,
+  config: typeof BASE_CONFIG
 ): { dx: number; dy: number } {
-  const t = time * CONFIG.WIND_SPEED;
+  const t = time * config.WIND_SPEED;
   
   // 伪随机摆动：基于时间和种子生成平滑变化
   const angle = (originX * 0.01 + originY * 0.007 + t * 0.5 + seed * 6.28) % (Math.PI * 2);
   const noise = Math.sin(angle) * Math.cos(t * 0.3 + seed * 3.14);
   
   // 简化的风场运动
-  const dx = (Math.sin(t * 0.4 + seed * 2) * 0.6 + noise * 0.4) * CONFIG.WIND_STRENGTH;
-  const dy = (Math.cos(t * 0.25 + seed * 1.5) * 0.4 + noise * 0.3 - 0.2) * CONFIG.WIND_STRENGTH * 0.6;
+  const dx = (Math.sin(t * 0.4 + seed * 2) * 0.6 + noise * 0.4) * config.WIND_STRENGTH;
+  const dy = (Math.cos(t * 0.25 + seed * 1.5) * 0.4 + noise * 0.3 - 0.2) * config.WIND_STRENGTH * 0.6;
 
   return { dx, dy };
 }
@@ -95,7 +122,7 @@ function calcContainRect(
   return { x: offsetX, y: offsetY, w: drawW, h: drawH };
 }
 
-function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
+function DreamParticles({ thumbnailUrl, visible, particleCount = 5 }: DreamParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<SandParticle[]>([]);
   const animRef = useRef<number>(0);
@@ -104,9 +131,17 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
   const startTimeRef = useRef<number>(0);
   // 保存绘制区域信息（用于动画中的坐标偏移）
   const drawRectRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  // 缓存配置
+  const configRef = useRef(getConfig(particleCount));
+
+  // 粒子数量变化时更新配置
+  useEffect(() => {
+    configRef.current = getConfig(particleCount);
+  }, [particleCount]);
 
   /** 动画循环 */
   const animate = useCallback((time: number) => {
+    const CONFIG = configRef.current;
     if (time - lastFrameRef.current < 1000 / CONFIG.FPS) {
       animRef.current = requestAnimationFrame(animate);
       return;
@@ -287,7 +322,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
         const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
 
         const particles: SandParticle[] = [];
-        const step = CONFIG.STEP;
+        const step = configRef.current.STEP;
 
         // ★ 先收集所有有效像素位置，然后随机采样以均匀分布
         const validPixels: {x: number, y: number, r: number, g: number, b: number}[] = [];
@@ -306,11 +341,11 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
 
         // ★ 如果有效像素太多，随机采样以均匀分布
         let selectedPixels = validPixels;
-        if (validPixels.length > CONFIG.MAX_PARTICLES) {
+        if (validPixels.length > configRef.current.MAX_PARTICLES) {
           // 随机打乱后取前 MAX_PARTICLES 个
           selectedPixels = validPixels
             .sort(() => Math.random() - 0.5)
-            .slice(0, CONFIG.MAX_PARTICLES);
+            .slice(0, configRef.current.MAX_PARTICLES);
         }
 
         // 生成粒子
@@ -326,7 +361,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
             windSeed: Math.random(),
             alpha: 0,
             life: Math.random() * 1200,
-            maxLife: CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS),
+            maxLife: configRef.current.SWAY_MIN_MS + Math.random() * (configRef.current.SWAY_MAX_MS - configRef.current.SWAY_MIN_MS),
             phase: 'forming',
             scatterAngle: 0,
             scatterSpeed: 0,
@@ -340,7 +375,7 @@ function DreamParticles({ thumbnailUrl, visible }: DreamParticlesProps) {
     }; // end img.onload
 
     return () => { cancelled = true; isReadyRef.current = false; };
-  }, [thumbnailUrl, visible]);
+  }, [thumbnailUrl, visible, particleCount]);
 
   // 动画控制
   useEffect(() => {

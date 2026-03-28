@@ -751,7 +751,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           }}
         >
           {currentPhoto && !isPortrait && (
-            <div className="relative w-full h-full overflow-hidden">
+            <div className="relative w-full h-full overflow-hidden transition-all duration-500 ease-out">
               {/* Exiting image - with page flip animation */}
               {prevIndex !== null && filteredPhotos[prevIndex] && transition === 'pageflip' && isFlipping && (
                 <div
@@ -880,7 +880,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           )}
 
         {currentPhoto && isPortrait && (
-          <div className="flex gap-4 h-full items-center">
+          <div className="flex gap-4 h-full items-center transition-all duration-500 ease-out">
             <div className="flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (
                 <img
