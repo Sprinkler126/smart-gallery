@@ -286,30 +286,6 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     loadBgmList();
   }, []);
 
-  // 加载当前照片的分析结果
-  useEffect(() => {
-    if (!currentPhoto) {
-      setPhotoAnalysis(null);
-      return;
-    }
-    
-    const loadAnalysis = async () => {
-      try {
-        const res = await fetch(`/photowall/api/analysis/${currentPhoto.id}`);
-        const data = await res.json();
-        if (data.success) {
-          setPhotoAnalysis(data.data);
-        } else {
-          setPhotoAnalysis(null);
-        }
-      } catch {
-        setPhotoAnalysis(null);
-      }
-    };
-    
-    loadAnalysis();
-  }, [currentPhoto?.id]);
-
   // 音频播放控制（与幻灯片播放状态同步，支持暂停续播）
   useEffect(() => {
     if (!bgmLoaded || bgmList.length === 0) return;
@@ -388,6 +364,30 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const effectiveUrl = currentPhoto
     ? (imageQuality === 'original' && currentPhoto.originalUrl ? currentPhoto.originalUrl : currentPhoto.url)
     : '';
+
+  // 加载当前照片的分析结果
+  useEffect(() => {
+    if (!currentPhoto) {
+      setPhotoAnalysis(null);
+      return;
+    }
+    
+    const loadAnalysis = async () => {
+      try {
+        const res = await fetch(`/photowall/api/analysis/${currentPhoto.id}`);
+        const data = await res.json();
+        if (data.success) {
+          setPhotoAnalysis(data.data);
+        } else {
+          setPhotoAnalysis(null);
+        }
+      } catch {
+        setPhotoAnalysis(null);
+      }
+    };
+    
+    loadAnalysis();
+  }, [currentPhoto?.id]);
 
   /* ---------- Ken Burns helper ---------- */
   const getKenBurns = (idx: number) => {
