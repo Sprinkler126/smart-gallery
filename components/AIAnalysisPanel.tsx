@@ -387,6 +387,19 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
           </div>
         )}
 
+        {/* Depict - Poetic Description */}
+        {analysis.depict && (
+          <div className="bg-gradient-to-r from-amber-500/10 to-purple-500/10 rounded-lg p-4 border border-amber-500/20">
+            <h4 className="text-sm font-medium text-amber-400 mb-2 flex items-center gap-2">
+              <Sparkles size={14} />
+              意境
+            </h4>
+            <p className="text-white/90 text-base leading-relaxed font-light">
+              {analysis.depict}
+            </p>
+          </div>
+        )}
+
         {/* Description */}
         {analysis.description && (
           <div>
