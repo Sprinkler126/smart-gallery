@@ -189,7 +189,7 @@ export class AIAnalysisService {
       prompt += '- description: A concise 1-2 sentence description in Chinese (图片的中文描述，客观描述画面内容)\n';
     }
     if (features.depict) {
-      prompt += '- depict: A poetic and evocative description in Chinese (画面意境描述，用简洁优美的语言描绘画面氛围和情感，可结合贴合画面的诗句，3-5句话)\n';
+      prompt += '- depict: A poetic and evocative description in Chinese (画面意境描述，用简洁优美的语言描绘画面氛围和情感，可结合贴合画面的诗句，一句话简短贴切即可)\n';
     }
     if (features.quality) {
       prompt += '- quality: Object with {score: 1-10, issues: array of quality issues in Chinese (质量问题，如：模糊, 过曝, 欠曝, 噪点)}\n';
