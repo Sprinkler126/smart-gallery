@@ -108,12 +108,13 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     }
   };
 
-  const triggerAnalysis = async () => {
+  const triggerAnalysis = async (force = false) => {
     if (!photo) return;
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/photowall/api/analysis/${photo.id}`, { method: 'POST' });
+      const url = `/photowall/api/analysis/${photo.id}${force ? '?force=true' : ''}`;
+      const response = await fetch(url, { method: 'POST' });
       const data = await response.json();
       if (data.success) {
         setAnalysis(data.data);
@@ -334,7 +335,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
             </button>
           ) : (
             <button
-              onClick={triggerAnalysis}
+              onClick={() => triggerAnalysis(true)}
               className="px-4 py-2 bg-gold text-obsidian rounded-lg hover:bg-gold/90 transition-colors flex items-center gap-2"
             >
               <Sparkles size={16} />
@@ -496,7 +497,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         {/* Re-analyze button */}
         {photo && (
           <button
-            onClick={triggerAnalysis}
+            onClick={() => triggerAnalysis(true)}
             className="w-full px-4 py-2 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
           >
             <RefreshCw size={14} />

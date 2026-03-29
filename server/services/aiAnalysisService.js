@@ -122,22 +122,23 @@ export class AIAnalysisService {
   /**
    * Analyze a single image
    * @param {Object} photo - Photo object with id, originalPath, etc.
+   * @param {boolean} force - Force re-analysis even if cached
    * @returns {Promise<Object>} Analysis result
    */
-  async analyzeImage(photo) {
+  async analyzeImage(photo, force = false) {
     if (!this.isAvailable()) {
       throw new Error('AI analysis not configured. Please set AI_API_ENDPOINT and AI_API_KEY');
     }
 
     const cacheKey = this.getCacheKey(photo.id, photo.originalPath);
     
-    // Check cache first
-    if (this.cache.has(cacheKey)) {
+    // Check cache first (unless force re-analysis)
+    if (!force && this.cache.has(cacheKey)) {
       console.log(`🧠 Using cached analysis for ${photo.title}`);
       return this.cache.get(cacheKey);
     }
 
-    console.log(`🧠 Analyzing image: ${photo.title}`);
+    console.log(`🧠 Analyzing image: ${photo.title}${force ? ' (forced re-analysis)' : ''}`);
 
     try {
       // Use thumbnail for analysis to reduce upload size and improve speed

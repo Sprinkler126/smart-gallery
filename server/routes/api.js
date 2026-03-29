@@ -999,6 +999,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
   /**
    * POST /api/analysis/:id
    * Trigger AI analysis for a specific photo
+   * Query params: ?force=true to force re-analysis
    * NOTE: Must be defined AFTER specific routes to avoid catching them as IDs
    */
   router.post('/analysis/:id', async (req, res) => {
@@ -1019,7 +1020,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         });
       }
 
-      const analysis = await aiAnalysisService.analyzeImage(photo);
+      const force = req.query.force === 'true';
+      const analysis = await aiAnalysisService.analyzeImage(photo, force);
       
       res.json({
         success: true,
