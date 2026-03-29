@@ -92,7 +92,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/analysis/${photoId}`);
+      const response = await fetch(`/photowall/api/analysis/${photoId}`);
       const data = await response.json();
       if (data.success) {
         setAnalysis(data.data);
@@ -113,7 +113,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/analysis/${photo.id}`, { method: 'POST' });
+      const response = await fetch(`/photowall/api/analysis/${photo.id}`, { method: 'POST' });
       const data = await response.json();
       if (data.success) {
         setAnalysis(data.data);
@@ -210,7 +210,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
       setBatchProgress({ current: i + 1, total: unanalyzedPhotos.length, photoId: photo.id });
       
       try {
-        const response = await fetch(`/api/analysis/${photo.id}`, { method: 'POST' });
+        const response = await fetch(`/photowall/api/analysis/${photo.id}`, { method: 'POST' });
         const data = await response.json();
         
         if (data.success) {
@@ -273,7 +273,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const response = await fetch(`/api/analysis/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await fetch(`/photowall/api/analysis/search?q=${encodeURIComponent(searchQuery)}`);
       const data = await response.json();
       if (data.success) {
         setSearchResults(data.data);

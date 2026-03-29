@@ -276,7 +276,7 @@ export function useGallery(options: UseGalleryOptions = {}): UseGalleryReturn {
     try {
       if (searchMode === 'semantic' && isApiAvailable) {
         // Semantic search via AI analysis API
-        const response = await fetch(`/api/analysis/search?q=${encodeURIComponent(query)}`);
+        const response = await fetch(`/photowall/api/analysis/search?q=${encodeURIComponent(query)}`);
         const data = await response.json();
         
         if (data.success && data.data) {
