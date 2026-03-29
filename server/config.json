@@ -41,5 +41,5 @@
   "aiApiKey": "",
   "aiModel": "",
   "enableAutoAnalysis": true,
-  "aiCacheDir": "./server/cache/analysis"
+  "aiCacheDir": "./cache/analysis"
 }

@@ -44,12 +44,28 @@ export class AIAnalysisService {
     this.analysisQueue = [];
     this.isProcessing = false;
     this.cache = new Map(); // In-memory cache
+    this.cacheLoaded = false;
     
     // Ensure cache directory exists
     fs.ensureDirSync(this.config.cacheDir);
     
-    // Load cached analyses
-    this.loadCache();
+    // Note: loadCache() should be called explicitly after instantiation
+    // to properly await the async operation
+  }
+  
+  /**
+   * Initialize the service - must be called after instantiation
+   */
+  async initialize() {
+    console.log('🧠 Initializing AI Analysis Service...');
+    console.log(`   Cache directory: ${this.config.cacheDir}`);
+    if (!this.cacheLoaded) {
+      await this.loadCache();
+      this.cacheLoaded = true;
+      console.log(`   Cache loaded: ${this.cache.size} analyses`);
+    } else {
+      console.log('   Cache already loaded');
+    }
   }
 
   /**
@@ -73,10 +89,16 @@ export class AIAnalysisService {
   async loadCache() {
     try {
       const cachePath = path.join(this.config.cacheDir, 'analysis-cache.json');
-      if (await fs.pathExists(cachePath)) {
+      const absolutePath = path.resolve(cachePath);
+      console.log(`   Looking for cache at: ${absolutePath}`);
+      const exists = await fs.pathExists(cachePath);
+      console.log(`   Cache file exists: ${exists}`);
+      if (exists) {
         const data = await fs.readJson(cachePath);
         this.cache = new Map(Object.entries(data));
         console.log(`🧠 Loaded ${this.cache.size} cached AI analyses`);
+      } else {
+        console.log('   No cache file found');
       }
     } catch (error) {
       console.warn('Failed to load AI analysis cache:', error.message);
@@ -358,52 +380,90 @@ export class AIAnalysisService {
   }
 
   /**
-   * Search photos by semantic query
-   * Only searches photos that have been analyzed (cached)
-   * This is a simple implementation - can be enhanced with vector DB
+   * Search photos by tags and description (fuzzy matching)
+   * Searches photos that have been analyzed (cached)
+   * Supports partial matching in tags and description
+   * Works with cached data even without API configuration
    */
   async searchByQuery(query, photos) {
-    if (!this.isAvailable()) {
-      throw new Error('AI analysis not configured');
+    // Allow search if we have cached analyses, even without API config
+    if (this.cache.size === 0 && !this.isAvailable()) {
+      throw new Error('AI analysis not configured and no cached data available');
     }
 
     const results = [];
-    const queryLower = query.toLowerCase();
-    const keywords = queryLower.split(/\s+/);
+    const queryLower = query.toLowerCase().trim();
+    
+    if (!queryLower) {
+      return results;
+    }
     
     for (const photo of photos) {
       const cacheKey = this.getCacheKey(photo.id, photo.originalPath);
       
       // Only search photos that have been analyzed (in cache)
-      // Do NOT trigger new analysis during search
       if (!this.cache.has(cacheKey)) {
         continue;
       }
       
       const analysis = this.cache.get(cacheKey);
 
-      // Simple keyword matching (can be replaced with semantic similarity)
-      const searchText = [
-        ...(analysis.tags || []),
-        analysis.category,
-        analysis.description,
-        analysis.technical?.composition,
-        analysis.technical?.lighting
-      ].filter(Boolean).join(' ').toLowerCase();
+      // Build searchable text from tags, description, category, and technical fields
+      const tagsText = (analysis.tags || []).join(' ').toLowerCase();
+      const descriptionText = (analysis.description || '').toLowerCase();
+      const categoryText = (analysis.category || '').toLowerCase();
+      const compositionText = (analysis.technical?.composition || '').toLowerCase();
+      const lightingText = (analysis.technical?.lighting || '').toLowerCase();
       
-      const matchCount = keywords.filter(kw => searchText.includes(kw)).length;
-      const score = matchCount / keywords.length;
+      // Check for matches in different fields with different weights
+      let score = 0;
+      let matchedFields = [];
+      
+      // Tag match (highest weight - exact or partial match)
+      if (tagsText.includes(queryLower)) {
+        score += 1.0;
+        matchedFields.push('tags');
+      }
+      
+      // Description match (high weight)
+      if (descriptionText.includes(queryLower)) {
+        score += 0.8;
+        matchedFields.push('description');
+      }
+      
+      // Category match (medium weight)
+      if (categoryText.includes(queryLower)) {
+        score += 0.6;
+        matchedFields.push('category');
+      }
+      
+      // Technical fields match (lower weight)
+      if (compositionText.includes(queryLower) || lightingText.includes(queryLower)) {
+        score += 0.4;
+        matchedFields.push('technical');
+      }
+      
+      // Also check individual keywords for multi-word queries
+      const keywords = queryLower.split(/\s+/).filter(k => k.length > 1);
+      if (keywords.length > 1) {
+        const allSearchText = `${tagsText} ${descriptionText} ${categoryText} ${compositionText} ${lightingText}`;
+        const keywordMatches = keywords.filter(kw => allSearchText.includes(kw)).length;
+        if (keywordMatches > 0) {
+          score += (keywordMatches / keywords.length) * 0.3;
+        }
+      }
 
-      if (score > 0.3) { // Threshold
+      if (score > 0) {
         results.push({
           photo,
           analysis,
-          relevanceScore: score
+          relevanceScore: score,
+          matchedFields
         });
       }
     }
 
-    // Sort by relevance
+    // Sort by relevance score (descending)
     return results.sort((a, b) => b.relevanceScore - a.relevanceScore);
   }
 

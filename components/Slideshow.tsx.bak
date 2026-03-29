@@ -50,7 +50,7 @@ const generateKenBurns = (): KenBurnsTransform => {
 
 const fetchOrientations = async (): Promise<Record<string, 'landscape' | 'portrait' | 'square'>> => {
   try {
-    const res = await fetch('/photowall/api/orientations');
+    const res = await fetch('/api/orientations');
     const data = await res.json();
     return data.success ? data.orientations : {};
   } catch { return {}; }
@@ -84,6 +84,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
   const [imageQuality, setImageQuality] = useState<'display' | 'original'>('display'); // 画质模式
+  const [particleCount, setParticleCount] = useState<number>(5); // 粒子数量等级 1-10
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]); // 随机排序后的索引
   
   /* ---------- Page Flip 状态 ---------- */
@@ -268,7 +269,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   useEffect(() => {
     const loadBgmList = async () => {
       try {
-        const res = await fetch('/photowall/api/bgm/list');
+        const res = await fetch('/api/bgm/list');
         const data = await res.json();
         if (data.success && data.data.length > 0) {
           // 随机排序
@@ -751,7 +752,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           }}
         >
           {currentPhoto && !isPortrait && (
-            <div className="relative w-full h-full overflow-hidden transition-all duration-500 ease-out">
+            <div className="relative w-full h-full overflow-hidden">
               {/* Exiting image - with page flip animation */}
               {prevIndex !== null && filteredPhotos[prevIndex] && transition === 'pageflip' && isFlipping && (
                 <div
@@ -796,22 +797,47 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
               )}
               
-              {/* 加载状态：缩略图也没加载出来时显示呼吸粒子 */}
+              {/* Elegant Pulse - 高级呼吸动画 */}
               {!imageLoaded && !thumbnailLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
                   <div className="relative">
-                    {/* 呼吸的光晕效果 */}
+                    {/* 外层光环 - 缓慢扩散 */}
                     <div 
-                      className="w-32 h-32 rounded-full bg-gradient-to-br from-yellow-400/30 to-orange-500/20"
+                      className="absolute inset-0 w-40 h-40 -m-4 rounded-full border border-gold/10"
                       style={{
-                        animation: 'breathe 2s ease-in-out infinite',
-                        filter: 'blur(20px)',
+                        animation: 'elegantPulse 4s ease-in-out infinite',
                       }}
                     />
-                    {/* 中心点 */}
+                    {/* 中层光环 - 反向旋转 */}
                     <div 
-                      className="absolute inset-0 m-auto w-4 h-4 rounded-full bg-yellow-400/60"
+                      className="absolute inset-0 w-32 h-32 rounded-full border border-gold/20"
                       style={{
+                        animation: 'elegantPulse 3s ease-in-out infinite reverse',
+                      }}
+                    />
+                    {/* 核心光晕 - 金色渐变 */}
+                    <div 
+                      className="w-24 h-24 rounded-full bg-gradient-to-br from-gold/30 via-amber-400/20 to-orange-500/10"
+                      style={{
+                        animation: 'coreGlow 2s ease-in-out infinite',
+                        filter: 'blur(8px)',
+                      }}
+                    />
+                    {/* 中心亮点 */}
+                    <div 
+                      className="absolute inset-0 flex items-center justify-center"
+                    >
+                      <div 
+                        className="w-3 h-3 rounded-full bg-gold"
+                        style={{
+                          animation: 'coreGlow 2s ease-in-out infinite 0.5s',
+                          boxShadow: '0 0 20px 5px rgba(251, 191, 36, 0.5)',
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
                         animation: 'breathe 2s ease-in-out infinite 0.3s',
                       }}
                     />
@@ -824,6 +850,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
+                  particleCount={particleCount}
                 />
               )}
               {/* 缩略图（半透明叠加在粒子上） */}
@@ -880,7 +907,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           )}
 
         {currentPhoto && isPortrait && (
-          <div className="flex gap-4 h-full items-center transition-all duration-500 ease-out">
+          <div className="flex gap-4 h-full items-center">
             <div className="flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (
                 <img
@@ -895,6 +922,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               <DreamParticles
                 thumbnailUrl={currentPhoto.thumbnail}
                 visible={!imageLoaded}
+                particleCount={particleCount}
               />
               {/* 缩略图（半透明叠加在粒子上） */}
               {!imageLoaded && thumbnailLoaded && (
@@ -1061,6 +1089,33 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   <span>{label}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+
+          {/* Particle Count Slider */}
+          <div className="space-y-3 mb-4">
+            <div className="flex items-center justify-between">
+              <p className="text-white/60 text-xs flex items-center gap-2">✨ Particles</p>
+              <span className="text-yellow-400 text-xs font-medium">{particleCount}/10</span>
+            </div>
+            <div className="relative">
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={particleCount}
+                onChange={(e) => { e.stopPropagation(); setParticleCount(parseInt(e.target.value)); }}
+                className="w-full h-2 bg-white/10 rounded-full appearance-none cursor-pointer accent-yellow-400 hover:bg-white/20 transition-colors"
+                style={{
+                  background: `linear-gradient(to right, #facc15 0%, #facc15 ${(particleCount - 1) * 11.1}%, rgba(255,255,255,0.1) ${(particleCount - 1) * 11.1}%)`
+                }}
+              />
+              <div className="flex justify-between mt-1 text-white/30 text-[10px]">
+                <span>Min</span>
+                <span>Max</span>
+              </div>
             </div>
           </div>
 

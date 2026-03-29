@@ -5,22 +5,25 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
+      base: '/photowall/',
       server: {
         port: 3000,
         host: '0.0.0.0',
         allowedHosts: true,
         proxy: {
           // Proxy API requests to the backend server
-          '/api': {
+          '/photowall/api': {
             target: 'http://localhost:3001',
             changeOrigin: true,
             secure: false,
+            rewrite: (path) => path.replace(/^\/photowall/, ''),
           },
           // Proxy Socket.IO connections
-          '/socket.io': {
+          '/photowall/socket.io': {
             target: 'http://localhost:3001',
             changeOrigin: true,
             ws: true,
+            rewrite: (path) => path.replace(/^\/photowall/, ''),
           },
         },
       },

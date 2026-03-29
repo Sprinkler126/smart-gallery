@@ -43,9 +43,9 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       // Transform photos to API format
       const photos = result.photos.map(photo => ({
         id: photo.id,
-        url: `/api/display/${photo.id}`,
-        originalUrl: `/api/image/${photo.id}`,
-        thumbnail: `/api/thumbnail/${photo.id}`,
+        url: `/photowall/api/display/${photo.id}`,
+        originalUrl: `/photowall/api/image/${photo.id}`,
+        thumbnail: `/photowall/api/thumbnail/${photo.id}`,
         blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
         title: photo.title,
         category: photo.category,
@@ -93,9 +93,9 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         success: true,
         data: {
           id: photo.id,
-          url: `/api/display/${photo.id}`,
-          originalUrl: `/api/image/${photo.id}`,
-          thumbnail: `/api/thumbnail/${photo.id}`,
+          url: `/photowall/api/display/${photo.id}`,
+          originalUrl: `/photowall/api/image/${photo.id}`,
+          thumbnail: `/photowall/api/thumbnail/${photo.id}`,
           blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
           title: photo.title,
           category: photo.category,
@@ -798,7 +798,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
 
   /**
    * GET /api/analysis/search
-   * Search photos by semantic query
+   * Search photos by tags and description (fuzzy matching)
    */
   router.get('/analysis/search', async (req, res) => {
     try {
@@ -811,10 +811,12 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         });
       }
 
-      if (!aiAnalysisService.isAvailable()) {
+      // Allow search if we have cached analyses (even without API config)
+      const cacheSize = aiAnalysisService.cache?.size || 0;
+      if (cacheSize === 0 && !aiAnalysisService.isAvailable()) {
         return res.status(503).json({
           success: false,
-          error: 'AI analysis not configured'
+          error: 'AI analysis not configured and no cached data available'
         });
       }
 
@@ -824,18 +826,24 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       res.json({
         success: true,
         query,
+        total: results.length,
         data: results.map(r => ({
           photo: {
             id: r.photo.id,
-            url: `/api/display/${r.photo.id}`,
-            originalUrl: `/api/image/${r.photo.id}`,
-            thumbnail: `/api/thumbnail/${r.photo.id}`,
+            url: `/photowall/api/display/${r.photo.id}`,
+            originalUrl: `/photowall/api/image/${r.photo.id}`,
+            thumbnail: `/photowall/api/thumbnail/${r.photo.id}`,
             title: r.photo.title,
             category: r.photo.category,
             date: r.photo.date
           },
-          analysis: r.analysis,
-          relevanceScore: r.relevanceScore
+          analysis: {
+            tags: r.analysis.tags || [],
+            category: r.analysis.category,
+            description: r.analysis.description
+          },
+          relevanceScore: r.relevanceScore,
+          matchedFields: r.matchedFields || []
         }))
       });
     } catch (error) {
@@ -1053,7 +1061,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         .map(file => ({
           id: path.basename(file, path.extname(file)),
           filename: file,
-          url: `/api/bgm/${encodeURIComponent(file)}`
+          url: `/photowall/api/bgm/${encodeURIComponent(file)}`
         }));
 
       res.json({

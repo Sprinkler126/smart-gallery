@@ -6,7 +6,8 @@
 import { Photo } from '../types';
 
 // API base URL - can be configured for different environments
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+// Use relative path with /photowall prefix for production
+const API_BASE = import.meta.env.VITE_API_URL || '/photowall/api';
 
 export interface ApiResponse<T> {
   success: boolean;

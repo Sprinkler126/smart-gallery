@@ -73,7 +73,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
 
   const loadConfig = async () => {
     try {
-      const response = await fetch('/api/config');
+      const response = await fetch('/photowall/api/config');
       const data = await response.json();
       if (data.success) {
         setConfig({
@@ -131,7 +131,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setSaving(true);
     setSaveSuccess(false);
     try {
-      const response = await fetch('/api/config', {
+      const response = await fetch('/photowall/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -156,7 +156,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
   const loadStats = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/analysis/stats');
+      const response = await fetch('/photowall/api/analysis/stats');
       const data = await response.json();
       if (data.success) {
         setStats(data.data);
@@ -173,7 +173,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setLoadingUnanalyzed(true);
     try {
       // Use the efficient batch status API
-      const res = await fetch('/api/analysis/status');
+      const res = await fetch('/photowall/api/analysis/status');
       const data = await res.json();
       
       if (data.success) {
@@ -245,7 +245,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setTestResult(null);
     
     try {
-      const response = await fetch('/api/analysis/test', {
+      const response = await fetch('/photowall/api/analysis/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -287,7 +287,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
 
   const clearCache = async () => {
     try {
-      await fetch('/api/analysis/cache', { method: 'DELETE' });
+      await fetch('/photowall/api/analysis/cache', { method: 'DELETE' });
       setAnalysis(null);
       setStats(null);
     } catch (err) {

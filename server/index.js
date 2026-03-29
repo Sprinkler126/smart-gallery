@@ -21,8 +21,8 @@ import { createApiRouter } from './routes/api.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from .env file
-dotenv.config();
+// Load environment variables from .env file (look in parent directory)
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 // Load configuration
 const configPath = path.join(__dirname, 'config.json');
@@ -76,7 +76,8 @@ const io = new SocketIOServer(httpServer, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
-  }
+  },
+  path: '/photowall/socket.io'
 });
 
 // Initialize Gallery Service
@@ -107,8 +108,8 @@ console.log('   Model: Universal Sentence Encoder (local)');
 galleryService.on('photoAdded', (photo) => {
   io.emit('photo:added', {
     id: photo.id,
-    url: `/api/image/${photo.id}`,
-    thumbnail: `/api/thumbnail/${photo.id}`,
+    url: `/photowall/api/image/${photo.id}`,
+    thumbnail: `/photowall/api/thumbnail/${photo.id}`,
     title: photo.title,
     category: photo.category,
     date: photo.date,
@@ -124,8 +125,8 @@ galleryService.on('photoRemoved', (photoId) => {
 galleryService.on('photoUpdated', (photo) => {
   io.emit('photo:updated', {
     id: photo.id,
-    url: `/api/image/${photo.id}`,
-    thumbnail: `/api/thumbnail/${photo.id}`,
+    url: `/photowall/api/image/${photo.id}`,
+    thumbnail: `/photowall/api/thumbnail/${photo.id}`,
     title: photo.title,
     category: photo.category,
     date: photo.date,
@@ -163,17 +164,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// API Routes
-app.use('/api', createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config));
+// API Routes - mounted at /photowall/api
+app.use('/photowall/api', createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config));
 
-// Serve static files from dist (built frontend)
+// Serve static files from dist (built frontend) at /photowall
 const distPath = path.join(__dirname, '../dist');
 if (await fs.pathExists(distPath)) {
-  app.use(express.static(distPath));
+  app.use('/photowall', express.static(distPath));
   
-  // SPA fallback
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
+  // SPA fallback for /photowall/*
+  app.get('/photowall/*', (req, res) => {
+    if (!req.path.startsWith('/photowall/api')) {
       res.sendFile(path.join(distPath, 'index.html'));
     }
   });
@@ -209,6 +210,9 @@ io.on('connection', (socket) => {
 async function start() {
   console.log('🚀 Starting Dynamic Photo Gallery Server...\n');
   
+  // Initialize AI analysis service (load cached analyses)
+  await aiAnalysisService.initialize();
+  
   // Initialize gallery service
   await galleryService.initialize();
   
@@ -216,20 +220,20 @@ async function start() {
   const { port, host } = config.server;
   httpServer.listen(port, host, () => {
     console.log(`\n🌐 Server running at http://${host}:${port}`);
-    console.log(`📡 API available at http://${host}:${port}/api`);
+    console.log(`📡 API available at http://${host}:${port}/photowall/api`);
     console.log(`🔌 WebSocket enabled for real-time updates\n`);
     console.log('Available endpoints:');
-    console.log('  GET  /api/photos          - Get all photos');
-    console.log('  GET  /api/photos/:id      - Get single photo');
-    console.log('  GET  /api/image/:id       - Get full image');
-    console.log('  GET  /api/thumbnail/:id   - Get thumbnail');
-    console.log('  GET  /api/categories      - Get categories');
-    console.log('  GET  /api/sources         - Get image sources');
-    console.log('  POST /api/sources         - Add new source');
-    console.log('  POST /api/sources/:id/scan- Scan a source');
-    console.log('  POST /api/refresh         - Refresh all');
-    console.log('  GET  /api/stats           - Get statistics');
-    console.log('  GET  /api/config          - Get configuration');
+    console.log('  GET  /photowall/api/photos          - Get all photos');
+    console.log('  GET  /photowall/api/photos/:id      - Get single photo');
+    console.log('  GET  /photowall/api/image/:id       - Get full image');
+    console.log('  GET  /photowall/api/thumbnail/:id   - Get thumbnail');
+    console.log('  GET  /photowall/api/categories      - Get categories');
+    console.log('  GET  /photowall/api/sources         - Get image sources');
+    console.log('  POST /photowall/api/sources         - Add new source');
+    console.log('  POST /photowall/api/sources/:id/scan- Scan a source');
+    console.log('  POST /photowall/api/refresh         - Refresh all');
+    console.log('  GET  /photowall/api/stats           - Get statistics');
+    console.log('  GET  /photowall/api/config          - Get configuration');
     console.log('');
   });
 }

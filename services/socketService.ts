@@ -41,6 +41,7 @@ class SocketService {
       const socketUrl = url || (import.meta.env.VITE_API_URL || window.location.origin);
       
       this.socket = io(socketUrl, {
+        path: '/photowall/socket.io',
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: this.maxReconnectAttempts,

@@ -231,7 +231,7 @@ const App: React.FC = () => {
     try {
       console.log('🔄 Starting reset...');
       
-      const response = await fetch('/api/reset', {
+      const response = await fetch('/photowall/api/reset', {
         method: 'POST',
       });
       
