@@ -85,6 +85,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
   const [imageQuality, setImageQuality] = useState<'display' | 'original'>('display'); // 画质模式
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]); // 随机排序后的索引
+  const [particleLevel, setParticleLevel] = useState<number>(5); // 粒子数量级别 1-10
   
   /* ---------- Page Flip 状态 ---------- */
   const [flipDirection, setFlipDirection] = useState<FlipDirection>('right');
@@ -824,6 +825,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
+                  particleCount={particleLevel}
                 />
               )}
               {/* 缩略图（半透明叠加在粒子上） */}
@@ -895,6 +897,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               <DreamParticles
                 thumbnailUrl={currentPhoto.thumbnail}
                 visible={!imageLoaded}
+                particleCount={particleLevel}
               />
               {/* 缩略图（半透明叠加在粒子上） */}
               {!imageLoaded && thumbnailLoaded && (
@@ -1061,6 +1064,28 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   <span>{label}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Particle Count */}
+          <div className="space-y-2 mb-4">
+            <p className="text-white/60 text-xs flex items-center gap-2">✨ Particles</p>
+            <div className="flex items-center gap-3">
+              <span className="text-white/40 text-xs">Min</span>
+              <input
+                type="range"
+                min="1"
+                max="10"
+                value={particleLevel}
+                onChange={(e) => { setParticleLevel(parseInt(e.target.value)); }}
+                className="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-yellow-400"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <span className="text-white/40 text-xs">Max</span>
+            </div>
+            <div className="flex justify-between text-white/60 text-xs">
+              <span>Level: {particleLevel}</span>
+              <span>{particleLevel <= 3 ? 'Light' : particleLevel <= 7 ? 'Medium' : 'Heavy'}</span>
             </div>
           </div>
 
