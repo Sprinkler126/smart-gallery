@@ -204,7 +204,7 @@ const App: React.FC = () => {
 
   const handleDeletePhoto = async (photoId: string) => {
     try {
-      const response = await fetch(`/api/photo/${photoId}`, {
+      const response = await fetch(`/photowall/api/photo/${photoId}`, {
         method: 'DELETE',
       });
       
@@ -293,7 +293,7 @@ const App: React.FC = () => {
 
     for (const photoId of idsToDelete) {
       try {
-        const response = await fetch(`/api/photo/${photoId}`, {
+        const response = await fetch(`/photowall/api/photo/${photoId}`, {
           method: 'DELETE',
         });
         const result = await response.json();
