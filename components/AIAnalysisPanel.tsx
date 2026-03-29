@@ -299,8 +299,23 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     if (loading) {
       return (
         <div className="flex flex-col items-center justify-center py-12">
-          <Loader2 size={32} className="animate-spin text-gold mb-4" />
-          <p className="text-gray-400">Analyzing image...</p>
+          <div className="relative mb-6">
+            <Loader2 size={48} className="animate-spin text-gold" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Brain size={20} className="text-gold/60" />
+            </div>
+          </div>
+          <p className="text-white/90 text-lg mb-2">AI 正在分析中...</p>
+          <p className="text-gray-500 text-sm">这可能需要 10-30 秒，请稍候</p>
+          <div className="mt-6 flex gap-1">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="w-2 h-2 bg-gold/60 rounded-full animate-bounce"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </div>
         </div>
       );
     }
