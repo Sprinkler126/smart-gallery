@@ -28,6 +28,7 @@ export interface AIAnalysisResult {
   tags: string[];
   category: string;
   description: string;
+  depict: string;  // Poetic depiction of the image
   quality: {
     score: number;
     issues: string[];

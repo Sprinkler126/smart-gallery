@@ -4,7 +4,7 @@ import {
   Clock, Settings, Monitor, Image, Crop, Columns3,
   Volume2, VolumeX, Music
 } from 'lucide-react';
-import { Photo } from '../types';
+import { Photo, AIAnalysisResult } from '../types';
 import DreamParticles from './DreamParticles';
 import ProgressBar from './slideshow/ProgressBar';
 
@@ -86,6 +86,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const [imageQuality, setImageQuality] = useState<'display' | 'original'>('display'); // 画质模式
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]); // 随机排序后的索引
   const [particleLevel, setParticleLevel] = useState<number>(5); // 粒子数量级别 1-10
+  const [photoAnalysis, setPhotoAnalysis] = useState<AIAnalysisResult | null>(null); // 当前照片的分析结果
   
   /* ---------- Page Flip 状态 ---------- */
   const [flipDirection, setFlipDirection] = useState<FlipDirection>('right');
@@ -284,6 +285,30 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     };
     loadBgmList();
   }, []);
+
+  // 加载当前照片的分析结果
+  useEffect(() => {
+    if (!currentPhoto) {
+      setPhotoAnalysis(null);
+      return;
+    }
+    
+    const loadAnalysis = async () => {
+      try {
+        const res = await fetch(`/photowall/api/analysis/${currentPhoto.id}`);
+        const data = await res.json();
+        if (data.success) {
+          setPhotoAnalysis(data.data);
+        } else {
+          setPhotoAnalysis(null);
+        }
+      } catch {
+        setPhotoAnalysis(null);
+      }
+    };
+    
+    loadAnalysis();
+  }, [currentPhoto?.id]);
 
   // 音频播放控制（与幻灯片播放状态同步，支持暂停续播）
   useEffect(() => {
@@ -1115,9 +1140,11 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           <div className="flex items-end justify-between max-w-6xl mx-auto">
             {currentPhoto && (
               <div>
-                {/* 照片标题 - 幻灯片时不显示 */}
+                {/* 照片标题/意境描述 - 幻灯片时不显示 */}
                 {!isPlaying && (
-                  <h2 className="text-white text-2xl font-light tracking-wide mb-2">{currentPhoto.title}</h2>
+                  <h2 className="text-white text-2xl font-light tracking-wide mb-2">
+                    {photoAnalysis?.depict || currentPhoto.title}
+                  </h2>
                 )}
                 <div className="flex items-center gap-4 text-white/60 text-sm font-light">
                   {/* 文件夹/分类 */}

@@ -33,6 +33,7 @@ export class AIAnalysisService {
         tags: true,           // Generate semantic tags
         category: true,       // Auto-categorize
         description: true,    // Generate description
+        depict: true,         // Generate poetic depiction
         quality: true,        // Quality assessment
         aesthetic: true,      // Aesthetic score
         technical: true,      // Technical feedback
@@ -185,7 +186,10 @@ export class AIAnalysisService {
       prompt += '- category: Best single category in Chinese (分类，如：风景, 人像, 街拍, 建筑, 自然, 美食, 活动, 动物, 植物, 静物, 夜景, 旅行)\n';
     }
     if (features.description) {
-      prompt += '- description: A concise 1-2 sentence description in Chinese (图片的中文描述)\n';
+      prompt += '- description: A concise 1-2 sentence description in Chinese (图片的中文描述，客观描述画面内容)\n';
+    }
+    if (features.depict) {
+      prompt += '- depict: A poetic and evocative description in Chinese (画面意境描述，用简洁优美的语言描绘画面氛围和情感，可结合贴合画面的诗句，3-5句话)\n';
     }
     if (features.quality) {
       prompt += '- quality: Object with {score: 1-10, issues: array of quality issues in Chinese (质量问题，如：模糊, 过曝, 欠曝, 噪点)}\n';
@@ -292,6 +296,7 @@ export class AIAnalysisService {
         tags: parsed.tags || [],
         category: parsed.category || photo.category,
         description: parsed.description || '',
+        depict: parsed.depict || '',
         quality: parsed.quality || { score: 0, issues: [] },
         aesthetic: parsed.aesthetic || { score: 0, strengths: [] },
         technical: parsed.technical || { composition: '', lighting: '', focus: '', exposure: '' },
@@ -308,6 +313,7 @@ export class AIAnalysisService {
         tags: [],
         category: photo.category,
         description: result.substring(0, 200), // First 200 chars
+        depict: '',
         quality: { score: 0, issues: [] },
         aesthetic: { score: 0, strengths: [] },
         technical: { composition: '', lighting: '', focus: '', exposure: '' },
