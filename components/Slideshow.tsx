@@ -846,7 +846,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               )}
               
               {/* 梦幻粒子效果（原图加载中时显示） */}
-              {!imageLoaded && thumbnailLoaded && (
+              {!imageLoaded && thumbnailLoaded && particleLevel > 0 && (
                 <DreamParticles
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
@@ -921,7 +921,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               {/* 梦幻粒子效果（原图加载中时显示） */}
               <DreamParticles
                 thumbnailUrl={currentPhoto.thumbnail}
-                visible={!imageLoaded}
+                visible={!imageLoaded && particleLevel > 0}
                 particleCount={particleLevel}
               />
               {/* 缩略图（半透明叠加在粒子上） */}
@@ -1092,26 +1092,38 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
             </div>
           </div>
 
-          {/* Particle Count */}
+          {/* Particle Toggle + Slider */}
           <div className="space-y-2 mb-4">
-            <p className="text-white/60 text-xs flex items-center gap-2">✨ Particles</p>
-            <div className="flex items-center gap-3">
-              <span className="text-white/40 text-xs">Min</span>
-              <input
-                type="range"
-                min="1"
-                max="10"
-                value={particleLevel}
-                onChange={(e) => { setParticleLevel(parseInt(e.target.value)); }}
-                className="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-yellow-400"
-                onClick={(e) => e.stopPropagation()}
-              />
-              <span className="text-white/40 text-xs">Max</span>
+            <div className="flex items-center justify-between">
+              <span className="text-white/70 text-sm">✨ 粒子效果</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setParticleLevel((prev) => prev > 0 ? 0 : 5); }}
+                className={`w-12 h-6 rounded-full transition-all ${
+                  particleLevel > 0 ? 'bg-amber-500' : 'bg-white/20'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                    particleLevel > 0 ? 'translate-x-6' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
             </div>
-            <div className="flex justify-between text-white/60 text-xs">
-              <span>Level: {particleLevel}</span>
-              <span>{particleLevel <= 3 ? 'Light' : particleLevel <= 7 ? 'Medium' : 'Heavy'}</span>
-            </div>
+            {particleLevel > 0 && (
+              <div className="flex items-center gap-3 pt-1">
+                <span className="text-white/40 text-xs">少量</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={particleLevel}
+                  onChange={(e) => { setParticleLevel(parseInt(e.target.value)); }}
+                  className="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-yellow-400"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="text-white/40 text-xs">密集</span>
+              </div>
+            )}
           </div>
 
           {/* Shortcuts */}

@@ -211,7 +211,8 @@ async function start() {
   console.log('🚀 Starting Dynamic Photo Gallery Server...\n');
   
   // Initialize AI analysis service (load cached analyses)
-  await aiAnalysisService.initialize();
+  // Pass __dirname to ensure correct cache path resolution
+  await aiAnalysisService.initialize(__dirname);
   
   // Initialize gallery service
   await galleryService.initialize();

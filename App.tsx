@@ -583,10 +583,11 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Categories Navigation - Auto wrap when overflow */}
+        {/* Categories Navigation */}
         <div className="border-t border-white/5 bg-black/20">
           <div className="max-w-7xl mx-auto px-6 py-3">
-            <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+            {/* 桌面端：横排按钮 */}
+            <div className="hidden md:flex flex-wrap items-center gap-x-8 gap-y-2">
               {categories.map(cat => (
                 <button
                   key={cat}
@@ -604,6 +605,46 @@ const App: React.FC = () => {
                   {currentCategory === cat && <span className="absolute -bottom-1 left-0 right-0 h-0.5 bg-gold" />}
                 </button>
               ))}
+            </div>
+            {/* 移动端：下拉选择器 */}
+            <div className="md:hidden relative">
+              <button
+                onClick={() => {
+                  const el = document.getElementById('mobile-cat-dropdown');
+                  if (el) el.classList.toggle('hidden');
+                }}
+                className="flex items-center gap-2 text-sm font-medium text-gold bg-white/5 rounded-lg px-3 py-2 w-full"
+              >
+                <span className="truncate">{currentCategory}</span>
+                {stats?.categories && currentCategory !== 'All' && (
+                  <span className="text-xs text-gray-500">({stats.categories[currentCategory] || 0})</span>
+                )}
+                <ChevronDown size={14} className="ml-auto text-gray-500 flex-shrink-0" />
+              </button>
+              <div
+                id="mobile-cat-dropdown"
+                className="hidden absolute top-full left-0 right-0 mt-1 bg-charcoal/95 backdrop-blur-md border border-white/10 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto"
+              >
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      handleCategoryClick(cat);
+                      document.getElementById('mobile-cat-dropdown')?.classList.add('hidden');
+                    }}
+                    className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between ${
+                      currentCategory === cat
+                        ? 'text-gold bg-gold/10'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <span>{cat}</span>
+                    {stats?.categories && cat !== 'All' && (
+                      <span className="text-xs text-gray-600">{stats.categories[cat] || 0}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

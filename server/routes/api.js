@@ -914,9 +914,11 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       const analyzedIds = new Set();
       
       // Get all analyzed photo IDs from cache
+      // Cache key is now photoId directly (changed from MD5 hash)
       for (const [cacheKey, analysis] of aiAnalysisService.cache) {
-        if (analysis && analysis.photoId) {
-          analyzedIds.add(analysis.photoId);
+        // cacheKey is now the photoId
+        if (analysis) {
+          analyzedIds.add(cacheKey);
         }
       }
       

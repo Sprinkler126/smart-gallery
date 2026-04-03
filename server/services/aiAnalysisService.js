@@ -47,8 +47,10 @@ export class AIAnalysisService {
     this.cache = new Map(); // In-memory cache
     this.cacheLoaded = false;
     
-    // Ensure cache directory exists
-    fs.ensureDirSync(this.config.cacheDir);
+    // Store baseDir for later path resolution in initialize()
+    this._baseDir = null;
+    
+    // Note: ensureDirSync is called in initialize() after path resolution
     
     // Note: loadCache() should be called explicitly after instantiation
     // to properly await the async operation
@@ -56,9 +58,21 @@ export class AIAnalysisService {
   
   /**
    * Initialize the service - must be called after instantiation
+   * @param {string} baseDir - Optional base directory to resolve relative paths
    */
-  async initialize() {
+  async initialize(baseDir = null) {
     console.log('🧠 Initializing AI Analysis Service...');
+    
+    // Resolve cache directory to absolute path if needed
+    if (baseDir && !path.isAbsolute(this.config.cacheDir)) {
+      this.config.cacheDir = path.resolve(baseDir, this.config.cacheDir);
+    } else if (!path.isAbsolute(this.config.cacheDir)) {
+      this.config.cacheDir = path.resolve(this.config.cacheDir);
+    }
+    
+    // Ensure cache directory exists (now that we have the correct path)
+    await fs.ensureDir(this.config.cacheDir);
+    
     console.log(`   Cache directory: ${this.config.cacheDir}`);
     if (!this.cacheLoaded) {
       await this.loadCache();
@@ -78,14 +92,16 @@ export class AIAnalysisService {
 
   /**
    * Get cache key for a photo
+   * CHANGED: Use photoId directly as cache key for stability across path changes
    */
   getCacheKey(photoId, imagePath) {
-    // Use photo ID + file modification time to invalidate stale cache
-    return crypto.createHash('md5').update(`${photoId}-${imagePath}`).digest('hex');
+    // Use photoId directly as cache key (more stable across path changes)
+    return photoId;
   }
 
   /**
    * Load cached analyses from disk
+   * MIGRATION: Automatically migrate old MD5-based keys to photoId-based keys
    */
   async loadCache() {
     try {
@@ -96,8 +112,35 @@ export class AIAnalysisService {
       console.log(`   Cache file exists: ${exists}`);
       if (exists) {
         const data = await fs.readJson(cachePath);
-        this.cache = new Map(Object.entries(data));
-        console.log(`🧠 Loaded ${this.cache.size} cached AI analyses`);
+        const rawCache = new Map(Object.entries(data));
+        
+        // MIGRATION: Convert old MD5 keys to photoId keys
+        let migratedCount = 0;
+        this.cache = new Map();
+        for (const [key, value] of rawCache) {
+          // Check if this is an old MD5 key (32 hex chars) or already a photoId
+          if (key.length === 32 && /^[a-f0-9]+$/.test(key)) {
+            // Old MD5 key - migrate to photoId
+            if (value.photoId) {
+              this.cache.set(value.photoId, value);
+              migratedCount++;
+            } else {
+              // Skip entries without photoId (can't migrate)
+              console.warn(`   Skipping cache entry without photoId: ${key}`);
+            }
+          } else {
+            // Already using photoId as key
+            this.cache.set(key, value);
+          }
+        }
+        
+        console.log(`🧠 Loaded ${this.cache.size} cached AI analyses (${migratedCount} migrated from old format)`);
+        
+        // Save migrated cache back to disk
+        if (migratedCount > 0) {
+          await this.saveCache();
+          console.log(`   Migrated cache saved to disk`);
+        }
       } else {
         console.log('   No cache file found');
       }
