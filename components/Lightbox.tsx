@@ -397,9 +397,9 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
           </div>
         )}
         
-        {/* Zoom Hint */}
+        {/* Zoom Hint - 桌面端显示 */}
         {imageLoaded && !imageError && zoom === 1 && (
-          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full text-white/60 text-xs pointer-events-none">
+          <div className="hidden md:block absolute top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full text-white/60 text-xs pointer-events-none">
             🖱️ Scroll to zoom • Drag to pan • Double-click to reset
           </div>
         )}

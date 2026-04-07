@@ -973,15 +973,26 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
             <X size={24} strokeWidth={1.5} />
           </button>
           <div className="flex items-center gap-3">
-            {/* BGM Mute Toggle */}
+            {/* BGM Mute Toggle with Hover Track Name */}
             {bgmLoaded && bgmList.length > 0 && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); setIsMuted((p) => !p); }} 
-                className={`p-3 rounded-full transition-colors ${isMuted ? 'text-white/30 hover:text-white/70 hover:bg-white/5' : 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10'}`} 
-                title={isMuted ? 'Unmute Music (M)' : 'Mute Music (M)'}
-              >
-                {isMuted ? <VolumeX size={20} strokeWidth={1.5} /> : <Volume2 size={20} strokeWidth={1.5} />}
-              </button>
+              <div className="group relative flex items-center">
+                {/* Current Track Name - appears on hover */}
+                <div 
+                  className={`absolute right-full mr-2 flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0 ${isMuted ? 'bg-white/5' : 'bg-yellow-400/10'}`}
+                >
+                  <Music size={14} className={`${isMuted ? 'text-white/40' : 'text-yellow-400'} flex-shrink-0`} />
+                  <span className={`text-sm max-w-[200px] truncate ${isMuted ? 'text-white/50' : 'text-yellow-200'}`}>
+                    {bgmList[currentBgmIndex]?.filename.replace(/\.[^/.]+$/, '')}
+                  </span>
+                </div>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setIsMuted((p) => !p); }} 
+                  className={`p-3 rounded-full transition-colors ${isMuted ? 'text-white/30 hover:text-white/70 hover:bg-white/5' : 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10'}`} 
+                  title={isMuted ? 'Unmute Music (M)' : 'Mute Music (M)'}
+                >
+                  {isMuted ? <VolumeX size={20} strokeWidth={1.5} /> : <Volume2 size={20} strokeWidth={1.5} />}
+                </button>
+              </div>
             )}
             <button onClick={(e) => { e.stopPropagation(); setShowSettings((p) => !p); }} className={`p-3 rounded-full transition-colors ${showSettings ? 'bg-yellow-400 text-black' : 'text-white/30 hover:text-white/70 hover:bg-white/5'}`} title="Settings (S)">
               <Settings size={20} strokeWidth={1.5} />
@@ -1148,17 +1159,47 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
       {/* Bottom Info - 始终显示 */}
       <div className="absolute bottom-0 left-0 right-0 z-30">
-        <div className="bg-gradient-to-t from-black/70 via-black/30 to-transparent pt-32 pb-8 px-10">
+        <div className="bg-gradient-to-t from-black/70 via-black/30 to-transparent pt-20 md:pt-32 pb-6 md:pb-8 px-4 md:px-10">
           <div className="flex items-end justify-between max-w-6xl mx-auto">
             {currentPhoto && (
-              <div>
+              <div className="flex-1 min-w-0">
                 {/* 照片标题/意境描述 - 幻灯片时不显示 */}
                 {!isPlaying && (
-                  <h2 className="text-white text-2xl font-light tracking-wide mb-2">
+                  <h2 className="text-white text-lg md:text-2xl font-light tracking-wide mb-2 truncate">
                     {photoAnalysis?.depict || currentPhoto.title}
                   </h2>
                 )}
-                <div className="flex items-center gap-4 text-white/60 text-sm font-light">
+                {/* 移动端：双排布局 */}
+                <div className="md:hidden flex flex-col gap-1.5 text-white/60 text-xs font-light">
+                  <div className="flex items-center gap-3">
+                    {currentPhoto.category && (
+                      <span className="flex items-center gap-1">
+                        <span className="text-yellow-400/80">📁</span>
+                        <span className="truncate">{currentPhoto.category}</span>
+                      </span>
+                    )}
+                    {currentPhoto.date && (
+                      <span className="flex items-center gap-1">
+                        <span className="text-yellow-400/80">📅</span>
+                        {currentPhoto.date}
+                      </span>
+                    )}
+                    <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] uppercase text-white/50">{currentOrientation}</span>
+                  </div>
+                  {currentPhoto.exif && (
+                    <div className="flex items-center gap-1 text-white/40 text-[11px]">
+                      <span>📷</span>
+                      <span className="truncate">
+                        {currentPhoto.exif.camera}
+                        {currentPhoto.exif.aperture && ` · ${currentPhoto.exif.aperture}`}
+                        {currentPhoto.exif.shutter && ` · ${currentPhoto.exif.shutter}`}
+                        {currentPhoto.exif.iso && ` · ISO ${currentPhoto.exif.iso}`}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {/* 桌面端：单排布局 */}
+                <div className="hidden md:flex items-center gap-4 text-white/60 text-sm font-light">
                   {/* 文件夹/分类 */}
                   {currentPhoto.category && (
                     <span className="flex items-center gap-1.5">
@@ -1197,7 +1238,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 )}
               </div>
             )}
-            <div className="text-white/40 text-sm font-light tabular-nums">
+            <div className="text-white/40 text-xs md:text-sm font-light tabular-nums flex-shrink-0 ml-2">
               {safeIndex + 1} / {filteredPhotos.length}
             </div>
           </div>

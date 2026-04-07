@@ -453,22 +453,22 @@ const App: React.FC = () => {
       <header className={`sticky top-0 z-40 transition-all duration-300 border-b border-white/5 ${
         scrolled ? 'bg-obsidian/90 backdrop-blur-md py-2 shadow-lg' : 'bg-obsidian py-4'
       }`}>
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-3 md:px-6 flex items-center justify-between gap-2 overflow-hidden">
           <div className={`flex flex-col transition-all duration-300 ${scrolled ? 'opacity-100' : 'opacity-0 lg:opacity-100'}`}>
              {scrolled && <span className="font-serif text-lg tracking-tight">{appName}</span>}
           </div>
 
-          <div className="flex items-center gap-4">
-            {/* Search Box */}
-            <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
+          <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
+            {/* Search Box - 移动端简化 */}
+            <div className="flex items-center gap-1 md:gap-2 bg-white/5 rounded-lg px-2 md:px-3 py-1.5">
               <Search size={16} className="text-gray-500" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && performSearch()}
-                placeholder="搜索照片..."
-                className="bg-transparent border-none outline-none text-sm text-white placeholder-gray-500 w-32 md:w-48"
+                placeholder="搜索..."
+                className="bg-transparent border-none outline-none text-sm text-white placeholder-gray-500 w-20 md:w-48"
               />
               {searchQuery && (
                 <button
@@ -478,10 +478,10 @@ const App: React.FC = () => {
                   <X size={14} />
                 </button>
               )}
-              {/* Search Mode Toggle */}
+              {/* Search Mode Toggle - 桌面端显示 */}
               <button
                 onClick={() => setSearchMode(searchMode === 'fuzzy' ? 'semantic' : 'fuzzy')}
-                className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                className={`hidden md:inline-block text-xs px-2 py-0.5 rounded border transition-colors ${
                   searchMode === 'semantic'
                     ? 'border-gold text-gold'
                     : 'border-gray-600 text-gray-500 hover:border-gray-400'
@@ -503,38 +503,38 @@ const App: React.FC = () => {
             <div className="flex gap-1 bg-white/5 p-1 rounded-lg">
               <button 
                 onClick={() => setViewMode(ViewMode.GRID)}
-                className={`hidden md:block p-2 rounded-md transition-all ${viewMode === ViewMode.GRID ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.GRID ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
                 title="Grid View"
               >
-                <Grid size={18} />
+                <Grid size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.MASONRY)}
-                className={`hidden md:block p-2 rounded-md transition-all ${viewMode === ViewMode.MASONRY ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.MASONRY ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
                 title="Masonry View"
               >
-                <LayoutTemplate size={18} />
+                <LayoutTemplate size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.TIMELINE)}
-                className={`hidden md:block p-2 rounded-md transition-all ${viewMode === ViewMode.TIMELINE ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.TIMELINE ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
                 title="Timeline View"
               >
-                <Clock size={18} />
+                <Clock size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
-              {/* Slideshow Button - 对所有用户可见 */}
+              {/* Slideshow Button */}
               <button
                 onClick={() => openSlideshow(0)}
                 className="p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all border-l border-white/10 ml-1"
                 title="Start Slideshow"
               >
-                <Play size={18} />
+                <Play size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
             </div>
 
             {/* Refresh & Reset Buttons - 只在本地显示 */}
             {showAdminFeatures && (
-              <div className="flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-2">
                 {/* AI Analysis Button */}
                 <button
                   onClick={() => {
