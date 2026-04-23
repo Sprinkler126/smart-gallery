@@ -230,7 +230,7 @@ export class AIAnalysisService {
       prompt += '- category: Best single category in Chinese (分类，如：风景, 人像, 街拍, 建筑, 自然, 美食, 活动, 动物, 植物, 静物, 夜景, 旅行)\n';
     }
     if (features.description) {
-      prompt += '- description: A concise 1-2 sentence description in Chinese (图片的中文描述，客观描述画面内容)\n';
+      prompt += '- description: A detailed description in Chinese (图片的中文描述，客观描述画面内容。如果知道拍摄地点（如城市、地标、景点、经典机位），请具体指出是哪里的什么景点或机位，例如"香港维多利亚港夜景"、"北京故宫角楼"、"上海外滩"等)\n';
     }
     if (features.depict) {
       prompt += '- depict: A poetic and evocative description in Chinese (重点是用一句话(10字左右)点出图片的特别之处，简短有力，勾起欣赏者的回忆。1.可以是画面内容描述，用简洁优美的语言描绘画面内容，不追求全面，只抓重点；2.可结合贴合画面的诗词；3.如果知道是哪里也可以直接说是哪里的什么，或者是形容这里的诗句。无论是哪种描述方法，切记要简短，简单易懂，信达雅)\n';
@@ -242,7 +242,7 @@ export class AIAnalysisService {
       prompt += '- aesthetic: Object with {score: 1-10, strengths: array of aesthetic strengths in Chinese (美学优点，如：构图优美, 色彩和谐, 光影出色)}\n';
     }
     if (features.technical) {
-      prompt += '- technical: Object with {composition: string in Chinese (构图), lighting: string in Chinese (光线), focus: string in Chinese (对焦), exposure: string in Chinese (曝光)}\n';
+      prompt += '- technical: Object with {composition: string in Chinese (构图，详细说明构图方式和特点), lighting: string in Chinese (光线，详细说明光源、光质、光位、光影效果), focus: string in Chinese (对焦，详细说明焦点位置和景深效果), exposure: string in Chinese (曝光，详细说明曝光参数和曝光效果)}\n';
     }
     
     prompt += '\nRespond ONLY with valid JSON, no markdown formatting. All text values must be in Chinese (中文).';
@@ -275,7 +275,7 @@ export class AIAnalysisService {
           ]
         }
       ],
-      max_tokens: 1000,
+      max_tokens: 8000,
       temperature: 0.3
     };
 
@@ -302,6 +302,13 @@ export class AIAnalysisService {
       }
 
       const data = await response.json();
+      
+      // Debug: log finish_reason and usage
+      const choice = data.choices?.[0];
+      if (choice) {
+        console.log(`   API finish_reason: ${choice.finish_reason}`);
+        console.log(`   API usage:`, JSON.stringify(data.usage || {}));
+      }
       
       // Extract content from response (OpenAI format)
       return data.choices?.[0]?.message?.content || '';
