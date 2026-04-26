@@ -121,6 +121,7 @@ const App: React.FC = () => {
   // Hero section state
   const [heroIndex, setHeroIndex] = useState(0);
   const [scrolled, setScrolled] = useState(false);
+  const [heroPhotos, setHeroPhotos] = useState<Photo[]>([]);
   
   // 首页空闲检测 - 10秒无操作自动进入幻灯片
   const [homeIdleSeconds, setHomeIdleSeconds] = useState(0);
@@ -133,14 +134,47 @@ const App: React.FC = () => {
   const appName = config?.appName || 'SPRINKLER';
   const photographerName = config?.photographerName || 'Sprinkler';
 
-  // Hero Image Auto-Rotation - 12秒切换一次
+  // 获取横图用于首页 Hero 展示
   useEffect(() => {
     if (photos.length === 0) return;
+    
+    const fetchOrientations = async () => {
+      try {
+        const res = await fetch('/photowall/api/orientations');
+        const data = await res.json();
+        if (!data.success) return;
+        
+        const orientations = data.orientations as Record<string, 'landscape' | 'portrait' | 'square'>;
+        // 只选横图（landscape 或 square）
+        const landscapePhotos = photos.filter(p => {
+          const o = orientations[p.id];
+          return o === 'landscape' || o === 'square';
+        });
+        
+        // 如果没有横图，fallback 到所有照片
+        const pool = landscapePhotos.length > 0 ? landscapePhotos : photos;
+        
+        // 随机打乱取前 5 张
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        setHeroPhotos(shuffled.slice(0, Math.min(5, shuffled.length)));
+        setHeroIndex(0);
+      } catch {
+        // fallback: 用所有照片
+        setHeroPhotos(photos.slice(0, 5));
+      }
+    };
+    
+    fetchOrientations();
+  }, [photos]);
+
+  // Hero Image Auto-Rotation - 12秒切换一次
+  useEffect(() => {
+    if (heroPhotos.length === 0) return;
     const interval = setInterval(() => {
-      setHeroIndex((prev) => (prev + 1) % Math.min(5, photos.length));
+      setHeroIndex((prev) => (prev + 1) % heroPhotos.length);
     }, 12000);
     return () => clearInterval(interval);
-  }, [photos.length]);
+  }, [heroPhotos.length]);
 
   // Scroll detection
   useEffect(() => {
@@ -333,7 +367,7 @@ const App: React.FC = () => {
     scrollToGallery();
   };
 
-  const currentHeroPhoto = photos[heroIndex];
+  const currentHeroPhoto = heroPhotos[heroIndex];
 
   // Loading state
   if (isLoading) {
@@ -369,7 +403,7 @@ const App: React.FC = () => {
         
         {/* Dynamic Frosted Background */}
         <div className="absolute inset-0 z-0">
-          {photos.slice(0, 5).map((photo, index) => (
+          {heroPhotos.map((photo, index) => (
             <div 
               key={photo.id}
               className={`absolute inset-0 bg-cover bg-center transition-opacity duration-[2000ms] ease-in-out blur-3xl scale-110 opacity-60 ${
@@ -389,7 +423,7 @@ const App: React.FC = () => {
            <div className="glass-card p-3 sm:p-4 rounded-xl shadow-2xl animate-fade-in transform hover:scale-[1.01] transition-transform duration-700 max-w-4xl w-full mb-8">
               <div className="relative aspect-[16/9] md:aspect-[21/9] w-full overflow-hidden rounded-lg bg-black/50">
                  {/* Carousel Images - 使用原图 */}
-                 {photos.slice(0, 5).map((photo, index) => (
+                 {heroPhotos.map((photo, index) => (
                     <img 
                       key={photo.id}
                       src={photo.url}
