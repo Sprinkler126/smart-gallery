@@ -95,8 +95,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   /* ---------- BGM 状态 ---------- */
   const [bgmList, setBgmList]           = useState<{id: string, filename: string, url: string}[]>([]);
   const [currentBgmIndex, setCurrentBgmIndex] = useState(0);
-  const [isMuted, setIsMuted]           = useState(true); // 默认静音
+  const [isMuted, setIsMuted]           = useState(false); // 默认播放音乐
   const [bgmLoaded, setBgmLoaded]       = useState(false);
+  const [showSongList, setShowSongList] = useState(false); // 歌曲列表弹窗
+  const [musicMode, setMusicMode]       = useState<'background' | 'companion'>('background'); // 播放模式
 
   /* ---------- Refs ---------- */
   const containerRef     = useRef<HTMLDivElement>(null);
@@ -294,6 +296,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     if (!audioRef.current) {
       audioRef.current = new Audio();
       audioRef.current.volume = 0.5;
+      // 恢复上次保存的音量
+      const savedVolume = localStorage.getItem('sg_bgm_volume');
+      if (savedVolume) audioRef.current.volume = parseFloat(savedVolume);
     }
 
     const audio = audioRef.current;
@@ -317,13 +322,19 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }
     }
 
-    // 根据静音状态和幻灯片播放状态控制音乐
-    // 静音 或 幻灯片暂停 时，音乐暂停
-    if (isMuted || !isPlaying) {
+    // 根据静音状态和播放模式控制音乐
+    if (isMuted) {
       audio.pause();
-    } else {
-      // 非静音且幻灯片播放中，音乐从当前进度续播
+    } else if (musicMode === 'background') {
+      // 背景音模式：音乐不受幻灯片暂停影响，始终播放
       audio.play().catch(err => console.log('Audio play failed:', err));
+    } else {
+      // 伴随模式：音乐与幻灯片同步
+      if (isPlaying) {
+        audio.play().catch(err => console.log('Audio play failed:', err));
+      } else {
+        audio.pause();
+      }
     }
 
     // 当前歌曲结束，播放下一首
@@ -331,9 +342,23 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       setCurrentBgmIndex((prev) => (prev + 1) % bgmList.length);
     };
 
+    // 保存播放进度（每秒）
+    const saveInterval = setInterval(() => {
+      if (audio.src && !audio.paused) {
+        localStorage.setItem('sg_bgm_progress', JSON.stringify({
+          src: audio.src.replace(window.location.origin, ''),
+          time: audio.currentTime,
+          index: currentBgmIndex,
+        }));
+      }
+    }, 1000);
+
     audio.addEventListener('ended', handleEnded);
-    return () => audio.removeEventListener('ended', handleEnded);
-  }, [bgmLoaded, bgmList, currentBgmIndex, isMuted, isPlaying]);
+    return () => {
+      audio.removeEventListener('ended', handleEnded);
+      clearInterval(saveInterval);
+    };
+  }, [bgmLoaded, bgmList, currentBgmIndex, isMuted, isPlaying, musicMode]);
 
   // 清理音频
   useEffect(() => {
@@ -706,6 +731,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         }); break;
         case 'r':          setIsRandomOrder((p) => !p); break;
         case 'm':          if (bgmLoaded && bgmList.length > 0) setIsMuted((p) => !p); break;
+        case 'n':          if (bgmLoaded && bgmList.length > 0) setCurrentBgmIndex((p) => (p + 1) % bgmList.length); break;
       }
     };
     window.addEventListener('keydown', onKey);
@@ -978,7 +1004,18 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               <div className="group relative flex items-center">
                 {/* Current Track Name - appears on hover */}
                 <div 
-                  className={`absolute right-full mr-2 flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0 ${isMuted ? 'bg-white/5' : 'bg-yellow-400/10'}`}
+                  className={`absolute right-full mr-2 flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0 cursor-pointer select-none ${isMuted ? 'bg-white/5' : 'bg-yellow-400/10'}`}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setShowSongList((p) => !p);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // 右键切下一首
+                    setCurrentBgmIndex((prev) => (prev + 1) % bgmList.length);
+                  }}
+                  title="双击显示列表 · 右键下一首"
                 >
                   <Music size={14} className={`${isMuted ? 'text-white/40' : 'text-yellow-400'} flex-shrink-0`} />
                   <span className={`text-sm max-w-[200px] truncate ${isMuted ? 'text-white/50' : 'text-yellow-200'}`}>
@@ -1137,6 +1174,28 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
             )}
           </div>
 
+          {/* Music Mode */}
+          <div className="space-y-2 mb-4">
+            <p className="text-white/60 text-xs flex items-center gap-2">🎵 音乐模式</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); setMusicMode('background'); }}
+                className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${musicMode === 'background' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
+              >
+                🎧 背景音
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMusicMode('companion'); }}
+                className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${musicMode === 'companion' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
+              >
+                🎶 伴随
+              </button>
+            </div>
+            <p className="text-white/30 text-[10px]">
+              {musicMode === 'background' ? '幻灯片暂停时音乐继续播放' : '音乐与幻灯片同步暂停/播放'}
+            </p>
+          </div>
+
           {/* Shortcuts */}
           <div className="mt-4 pt-4 border-t border-white/10 text-white/40 text-xs space-y-1">
             <div><span className="text-white/60">Space</span> Play/Pause</div>
@@ -1145,6 +1204,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
             <div><span className="text-white/60">T</span> Transition ({transition})</div>
             <div><span className="text-white/60">R</span> Order ({isRandomOrder ? 'Random' : 'Sequential'})</div>
             <div><span className="text-white/60">M</span> Music</div>
+            <div><span className="text-white/60">N</span> Next Song</div>
           </div>
         </div>
       </div>
@@ -1253,6 +1313,54 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         currentIndex={currentIndex}
         onComplete={handleProgressComplete}
       />
+      
+      {/* Song List Popup */}
+      {showSongList && bgmList.length > 0 && (
+        <div 
+          className="absolute top-24 right-8 z-30"
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-4 w-72 shadow-2xl max-h-[50vh] flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-medium text-sm flex items-center gap-2">
+                <Music size={14} className="text-yellow-400" />
+                歌曲列表
+              </h3>
+              <button 
+                onClick={(e) => { e.stopPropagation(); setShowSongList(false); }}
+                className="text-white/40 hover:text-white/70 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-1">
+              {bgmList.map((bgm, idx) => (
+                <button
+                  key={bgm.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentBgmIndex(idx);
+                    setShowSongList(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all flex items-center gap-2 ${
+                    idx === currentBgmIndex
+                      ? 'bg-yellow-400/20 text-yellow-300'
+                      : 'text-white/70 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <span className="text-xs text-white/30 w-5 text-right flex-shrink-0">
+                    {idx === currentBgmIndex ? '▶' : `${idx + 1}`}
+                  </span>
+                  <span className="truncate">
+                    {bgm.filename.replace(/\.[^/.]+$/, '')}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Animation Styles */}
       <style>{`
