@@ -943,35 +943,48 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 />
               )}
             </div>
-            <div className="flex-[2] h-full relative">
-              {/* 梦幻粒子效果（原图加载中时显示） */}
-              <DreamParticles
-                thumbnailUrl={currentPhoto.thumbnail}
-                visible={!imageLoaded && particleLevel > 0}
-                particleCount={particleLevel}
-              />
-              {/* 缩略图（半透明叠加在粒子上） */}
-              {!imageLoaded && thumbnailLoaded && (
+            <div className="flex-[2] h-full relative overflow-hidden">
+              {/* Ken Burns wrapper for portrait */}
+              <div
+                className="w-full h-full"
+                style={
+                  transition === 'kenburns' && imageLoaded
+                    ? {
+                        transform: `scale(${getKenBurns(safeIndex).endScale}) translate(${getKenBurns(safeIndex).endX}%, ${getKenBurns(safeIndex).endY}%)`,
+                        transition: `transform ${intervalSec * 1000}ms cubic-bezier(0.25,0.1,0.25,1)`,
+                      }
+                    : undefined
+                }
+              >
+                {/* 梦幻粒子效果（原图加载中时显示） */}
+                <DreamParticles
+                  thumbnailUrl={currentPhoto.thumbnail}
+                  visible={!imageLoaded && particleLevel > 0}
+                  particleCount={particleLevel}
+                />
+                {/* 缩略图（半透明叠加在粒子上） */}
+                {!imageLoaded && thumbnailLoaded && (
+                  <img
+                    key={`${currentPhoto.id}-thumb`}
+                    src={currentPhoto.thumbnail}
+                    alt={currentPhoto.title}
+                    className="absolute inset-0 w-full h-full object-contain"
+                    style={{ zIndex: 1, filter: 'blur(20px)', opacity: 0.35 }}
+                  />
+                )}
+                {/* 原图（加载完成后才设置 src，避免渐进式渲染） */}
                 <img
-                  key={`${currentPhoto.id}-thumb`}
-                  src={currentPhoto.thumbnail}
+                  key={currentPhoto.id}
+                  src={displayedUrl}
                   alt={currentPhoto.title}
                   className="absolute inset-0 w-full h-full object-contain"
-                  style={{ zIndex: 1, filter: 'blur(20px)', opacity: 0.35 }}
+                  style={{
+                    zIndex: 2,
+                    opacity: imageLoaded ? 1 : 0,
+                    transition: `opacity ${TRANSITION_MS}ms ease`,
+                  }}
                 />
-              )}
-              {/* 原图（加载完成后才设置 src，避免渐进式渲染） */}
-              <img
-                key={currentPhoto.id}
-                src={displayedUrl}
-                alt={currentPhoto.title}
-                className="absolute inset-0 w-full h-full object-contain"
-                style={{
-                  zIndex: 2,
-                  opacity: imageLoaded ? 1 : 0,
-                  transition: `opacity ${TRANSITION_MS}ms ease`,
-                }}
-              />
+              </div>
             </div>
             <div className="flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (

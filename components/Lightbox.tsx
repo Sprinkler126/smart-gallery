@@ -286,39 +286,79 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
         onTouchEnd={handleTouchEnd}
       >
         <div 
-          className="relative transition-transform duration-100 ease-out"
+          className="relative transition-transform duration-100 ease-out flex items-center justify-center"
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
             transformOrigin: 'center center',
+            width: '90vw',
+            height: '85vh',
           }}
         >
-          {/* Loading Placeholder - Thumbnail Background + Elegant Loader */}
+          {/* Single thumbnail - always in the same position */}
+          {photo.thumbnail && !imageError && (
+            <img
+              src={photo.thumbnail}
+              alt=""
+              draggable={false}
+              className={`max-h-[85vh] max-w-[90vw] w-auto h-auto object-contain select-none transition-all duration-700 ${
+                imageLoaded ? 'opacity-0 blur-none' : 'opacity-100 blur-md'
+              }`}
+              style={{ WebkitUserSelect: 'none', pointerEvents: 'none' }}
+            />
+          )}
+
+          {/* Full image - absolutely stacked on top of thumbnail */}
+          <img
+            ref={imageRef}
+            src={photo.url}
+            alt={photo.title}
+            onLoad={handleImageLoad}
+            onError={handleImageError}
+            draggable={false}
+            className={`max-h-[85vh] max-w-[90vw] w-auto h-auto object-contain shadow-2xl select-none transition-opacity duration-700 protected-image absolute ${
+              imageLoaded && !imageError ? 'opacity-100' : 'opacity-0'
+            } ${zoom > 1 ? 'cursor-grbing' : 'cursor-grab'}`}
+            onContextMenu={(e) => e.preventDefault()}
+            onDragStart={(e) => e.preventDefault()}
+            style={{
+              WebkitUserSelect: 'none',
+              MozUserSelect: 'none',
+              msUserSelect: 'none',
+              userSelect: 'none',
+              WebkitUserDrag: 'none',
+              pointerEvents: 'none',
+            }}
+          />
+
+          {/* Dreamy loading overlay - on top while loading */}
           {!imageLoaded && !imageError && (
-            <div className="relative flex items-center justify-center w-[80vw] h-[80vh] overflow-hidden rounded-lg">
-              {/* Thumbnail as blurred background */}
-              {photo.thumbnail && (
-                <img
-                  src={photo.thumbnail}
-                  alt=""
-                  className="absolute inset-0 w-full h-full object-contain blur-2xl scale-110 opacity-40"
-                  draggable={false}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none" style={{ zIndex: 2 }}>
+              {/* Soft vignette */}
+              <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.3) 100%)' }} />
+              {/* Breathing glow */}
+              <div className="relative">
+                <div 
+                  className="w-24 h-24 rounded-full"
+                  style={{
+                    background: 'radial-gradient(circle, rgba(217,170,76,0.15) 0%, transparent 70%)',
+                    animation: 'breathe 3s ease-in-out infinite',
+                  }}
                 />
-              )}
-              {/* Dark overlay */}
-              <div className="absolute inset-0 bg-black/30" />
-              {/* Loading animation */}
-              <div className="relative z-10 flex flex-col items-center">
-                {/* Spinning rings */}
-                <div className="relative w-20 h-20">
-                  <div className="absolute inset-0 rounded-full border border-gold/20 animate-spin" style={{ animationDuration: '3s' }} />
-                  <div className="absolute inset-2 rounded-full border border-gold/30 animate-spin" style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-                  <div className="absolute inset-4 rounded-full border border-gold/40 animate-spin" style={{ animationDuration: '1.5s' }} />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-2 h-2 rounded-full bg-gold animate-ping" style={{ animationDuration: '2s' }} />
-                  </div>
+                <div 
+                  className="absolute inset-4 rounded-full"
+                  style={{
+                    background: 'radial-gradient(circle, rgba(217,170,76,0.25) 0%, transparent 70%)',
+                    animation: 'breathe 3s ease-in-out infinite 0.5s',
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div 
+                    className="w-1.5 h-1.5 rounded-full bg-gold/80"
+                    style={{ animation: 'breathe 2s ease-in-out infinite' }}
+                  />
                 </div>
-                <p className="mt-6 text-white/50 text-xs tracking-[0.3em] uppercase font-light animate-pulse">Loading</p>
               </div>
+              <p className="relative text-white/30 text-[10px] tracking-[0.5em] uppercase font-light">Loading</p>
             </div>
           )}
 
@@ -330,44 +370,6 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
               <p className="text-sm mt-2 text-gray-600">{photo.title}</p>
             </div>
           )}
-
-          {/* Actual Image with Protection */}
-          <div className="relative">
-            {/* Thumbnail base layer (always visible once loaded) */}
-            {photo.thumbnail && !imageError && (
-              <img
-                src={photo.thumbnail}
-                alt=""
-                draggable={false}
-                className={`max-h-[85vh] max-w-[90vw] w-auto h-auto object-contain select-none transition-opacity duration-500 ${
-                  imageLoaded ? 'opacity-0' : 'opacity-100 blur-md'
-                }`}
-                style={{ WebkitUserSelect: 'none', pointerEvents: 'none' }}
-              />
-            )}
-            {/* Full image on top */}
-            <img
-              ref={imageRef}
-              src={photo.url}
-              alt={photo.title}
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-              draggable={false}
-              className={`max-h-[85vh] max-w-[90vw] w-auto h-auto object-contain shadow-2xl select-none transition-opacity duration-500 protected-image ${
-                imageLoaded && !imageError ? 'opacity-100' : 'opacity-0 absolute inset-0'
-              } ${zoom > 1 ? 'cursor-grbing' : 'cursor-grab'}`}
-              onContextMenu={(e) => e.preventDefault()}
-              onDragStart={(e) => e.preventDefault()}
-              style={{
-                WebkitUserSelect: 'none',
-                MozUserSelect: 'none',
-                msUserSelect: 'none',
-                userSelect: 'none',
-                WebkitUserDrag: 'none',
-                pointerEvents: 'none',
-              }}
-            />
-          </div>
         </div>
         
         {/* Zoom Controls */}
@@ -512,6 +514,13 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
           </div>
         </div>
       )}
+      
+      <style>{`
+        @keyframes breathe {
+          0%, 100% { transform: scale(0.85); opacity: 0.3; }
+          50% { transform: scale(1.15); opacity: 0.8; }
+        }
+      `}</style>
     </div>
   );
 };
