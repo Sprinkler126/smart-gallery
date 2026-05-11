@@ -26,6 +26,7 @@
     "lucide-react": "^0.560.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "redis": "^4.7.1",
     "sharp": "^0.33.5",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5"

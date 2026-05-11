@@ -15,6 +15,7 @@ import dotenv from 'dotenv';
 
 import { GalleryService } from './services/galleryService.js';
 import { AIAnalysisService } from './services/aiAnalysisService.js';
+import { RedisCacheService } from './services/redisCacheService.js';
 import { VectorSearchService } from './services/vectorSearchService.js';
 import { createApiRouter } from './routes/api.js';
 
@@ -60,12 +61,32 @@ if (process.env.AI_API_KEY) {
 if (process.env.AI_MODEL) {
   config.aiModel = process.env.AI_MODEL;
 }
+if (process.env.AI_IMAGE_DETAIL) {
+  config.aiImageDetail = process.env.AI_IMAGE_DETAIL;
+}
+if (process.env.AI_MAX_TOKENS) {
+  config.aiMaxTokens = Number(process.env.AI_MAX_TOKENS);
+}
+if (process.env.AI_TEMPERATURE) {
+  config.aiTemperature = Number(process.env.AI_TEMPERATURE);
+}
+if (process.env.MAX_CONCURRENT_ANALYSIS) {
+  config.maxConcurrentAnalysis = Number(process.env.MAX_CONCURRENT_ANALYSIS);
+}
+if (process.env.AI_BATCH_DELAY_MS) {
+  config.aiBatchDelayMs = Number(process.env.AI_BATCH_DELAY_MS);
+}
+if (process.env.ANALYSIS_TIMEOUT_MS) {
+  config.analysisTimeout = Number(process.env.ANALYSIS_TIMEOUT_MS);
+}
 
 // Log configuration source (without exposing the actual key)
 console.log('🔧 Configuration loaded:');
 console.log(`   AI Endpoint: ${config.aiApiEndpoint || 'not set'} ${process.env.AI_API_ENDPOINT ? '(from env)' : '(from config)'}`);
 console.log(`   AI Key: ${config.aiApiKey ? '***' + config.aiApiKey.slice(-4) : 'not set'} ${process.env.AI_API_KEY ? '(from env)' : '(from config)'}`);
 console.log(`   AI Model: ${config.aiModel || 'not set'} ${process.env.AI_MODEL ? '(from env)' : '(from config)'}`);
+console.log(`   AI Speed: detail=${config.aiImageDetail || 'low'}, maxTokens=${config.aiMaxTokens || 8000}, concurrent=${config.maxConcurrentAnalysis || 4}`);
+console.log(`   Redis Cache: ${(config.redis?.enabled === true || process.env.REDIS_ENABLED === 'true') ? 'enabled' : 'disabled'}`);
 
 // Create Express app
 const app = express();
@@ -83,8 +104,11 @@ const io = new SocketIOServer(httpServer, {
 // Initialize Gallery Service
 const galleryService = new GalleryService(config);
 
+// Initialize optional Redis cache (disabled by default)
+const redisCacheService = new RedisCacheService(config);
+
 // Initialize AI Analysis Service
-const aiAnalysisService = new AIAnalysisService(config);
+const aiAnalysisService = new AIAnalysisService(config, redisCacheService);
 
 // Initialize Vector Search Service
 const vectorSearchService = new VectorSearchService(config);
@@ -209,6 +233,9 @@ io.on('connection', (socket) => {
 // Initialize and start server
 async function start() {
   console.log('🚀 Starting Dynamic Photo Gallery Server...\n');
+  
+  // Initialize optional Redis cache before services that can use it
+  await redisCacheService.connect();
   
   // Initialize AI analysis service (load cached analyses)
   // Pass __dirname to ensure correct cache path resolution

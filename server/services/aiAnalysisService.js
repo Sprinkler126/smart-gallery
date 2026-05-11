@@ -13,7 +13,7 @@ import path from 'path';
 import crypto from 'crypto';
 
 export class AIAnalysisService {
-  constructor(config = {}) {
+  constructor(config = {}, redisCacheService = null) {
     this.config = {
       // API Configuration - User can customize these
       apiEndpoint: config.aiApiEndpoint || process.env.AI_API_ENDPOINT || '',
@@ -22,8 +22,12 @@ export class AIAnalysisService {
       
       // Analysis Configuration
       enableAutoAnalysis: config.enableAutoAnalysis !== false, // Default: true
-      analysisTimeout: config.analysisTimeout || 120000, // 120 seconds (2 minutes) - multimodal LLM needs more time
-      maxConcurrent: config.maxConcurrentAnalysis || 2, // Reduce concurrent to avoid overwhelming the API
+      analysisTimeout: config.analysisTimeout || 60000, // 60 seconds by default for faster failure/retry feedback
+      maxConcurrent: config.maxConcurrentAnalysis || 4, // Parallel batch analysis to improve throughput
+      maxTokens: config.aiMaxTokens || 8000,
+      temperature: config.aiTemperature ?? 0.2,
+      imageDetail: config.aiImageDetail || 'low', // low detail is much faster and enough for thumbnails
+      batchDelayMs: config.aiBatchDelayMs ?? 0,
       
       // Cache Configuration
       cacheDir: config.aiCacheDir || './server/cache/analysis',
@@ -46,6 +50,10 @@ export class AIAnalysisService {
     this.isProcessing = false;
     this.cache = new Map(); // In-memory cache
     this.cacheLoaded = false;
+    this.redisCache = redisCacheService;
+    this.cacheNamespace = 'ai-analysis';
+    this.saveTimer = null;
+    this.saveInFlight = null;
     
     // Store baseDir for later path resolution in initialize()
     this._baseDir = null;
@@ -144,6 +152,16 @@ export class AIAnalysisService {
       } else {
         console.log('   No cache file found');
       }
+
+      if (this.redisCache?.isConnected()) {
+        const redisEntries = await this.redisCache.loadNamespace(this.cacheNamespace);
+        for (const [key, value] of redisEntries) {
+          this.cache.set(key, value);
+        }
+        if (redisEntries.size > 0) {
+          console.log(`🔴 Merged ${redisEntries.size} AI analyses from Redis cache`);
+        }
+      }
     } catch (error) {
       console.warn('Failed to load AI analysis cache:', error.message);
     }
@@ -159,6 +177,37 @@ export class AIAnalysisService {
       await fs.writeJson(cachePath, data, { spaces: 2 });
     } catch (error) {
       console.warn('Failed to save AI analysis cache:', error.message);
+    }
+  }
+
+  /**
+   * Schedule disk cache persistence without blocking AI responses.
+   */
+  scheduleCacheSave(delayMs = 1000) {
+    if (this.saveTimer) {
+      return;
+    }
+
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.saveInFlight = this.saveCache().finally(() => {
+        this.saveInFlight = null;
+      });
+    }, delayMs);
+  }
+
+  /**
+   * Flush any pending disk cache write.
+   */
+  async flushCacheSave() {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      await this.saveCache();
+    }
+
+    if (this.saveInFlight) {
+      await this.saveInFlight;
     }
   }
 
@@ -179,6 +228,15 @@ export class AIAnalysisService {
     if (!force && this.cache.has(cacheKey)) {
       console.log(`🧠 Using cached analysis for ${photo.title}`);
       return this.cache.get(cacheKey);
+    }
+
+    if (!force && this.redisCache?.isConnected()) {
+      const cached = await this.redisCache.get(this.cacheNamespace, cacheKey);
+      if (cached) {
+        this.cache.set(cacheKey, cached);
+        console.log(`🔴 Using Redis cached analysis for ${photo.title}`);
+        return cached;
+      }
     }
 
     console.log(`🧠 Analyzing image: ${photo.title}${force ? ' (forced re-analysis)' : ''}`);
@@ -204,7 +262,10 @@ export class AIAnalysisService {
 
       // Cache the result
       this.cache.set(cacheKey, analysis);
-      await this.saveCache();
+      if (this.redisCache?.isConnected()) {
+        await this.redisCache.set(this.cacheNamespace, cacheKey, analysis);
+      }
+      this.scheduleCacheSave();
 
       console.log(`✅ Analysis complete for ${photo.title}`);
       return analysis;
@@ -269,14 +330,14 @@ export class AIAnalysisService {
               type: 'image_url',
               image_url: {
                 url: `data:${mimeType};base64,${base64Image}`,
-                detail: 'high'
+                detail: this.config.imageDetail
               }
             }
           ]
         }
       ],
-      max_tokens: 8000,
-      temperature: 0.3
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature
     };
 
     // Create timeout controller for better compatibility
@@ -394,28 +455,37 @@ export class AIAnalysisService {
    * Batch analyze multiple images
    */
   async analyzeBatch(photos, onProgress) {
-    const results = [];
+    const results = new Array(photos.length).fill(null);
     const total = photos.length;
-    
-    for (let i = 0; i < photos.length; i++) {
-      try {
-        const analysis = await this.analyzeImage(photos[i]);
-        results.push(analysis);
-        
-        if (onProgress) {
-          onProgress(i + 1, total, photos[i], analysis);
+    const workerCount = Math.max(1, Math.min(this.config.maxConcurrent, total));
+    let nextIndex = 0;
+    let completed = 0;
+
+    const runWorker = async () => {
+      while (nextIndex < total) {
+        const currentIndex = nextIndex++;
+        const photo = photos[currentIndex];
+
+        try {
+          const analysis = await this.analyzeImage(photo);
+          results[currentIndex] = analysis;
+
+          if (this.config.batchDelayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, this.config.batchDelayMs));
+          }
+        } catch (error) {
+          console.error(`Failed to analyze ${photo.title}:`, error.message);
+        } finally {
+          completed++;
+          if (onProgress) {
+            onProgress(completed, total, photo, results[currentIndex]);
+          }
         }
-        
-        // Small delay to avoid rate limiting
-        if (i < photos.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      } catch (error) {
-        console.error(`Failed to analyze ${photos[i].title}:`, error.message);
-        results.push(null);
       }
-    }
-    
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, runWorker));
+    await this.flushCacheSave();
     return results;
   }
 
@@ -532,6 +602,9 @@ export class AIAnalysisService {
     const cachePath = path.join(this.config.cacheDir, 'analysis-cache.json');
     if (await fs.pathExists(cachePath)) {
       await fs.remove(cachePath);
+    }
+    if (this.redisCache?.isConnected()) {
+      await this.redisCache.clearNamespace(this.cacheNamespace);
     }
     console.log('🧠 AI analysis cache cleared');
   }

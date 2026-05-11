@@ -41,5 +41,15 @@
   "aiApiKey": "",
   "aiModel": "",
   "enableAutoAnalysis": true,
-  "aiCacheDir": "./cache/analysis"
+  "aiCacheDir": "./cache/analysis",
+  "analysisTimeout": 60000,
+  "maxConcurrentAnalysis": 4,
+  "aiMaxTokens": 8000,
+  "aiImageDetail": "low",
+  "aiBatchDelayMs": 0,
+  "redis": {
+    "enabled": false,
+    "url": "redis://localhost:6379",
+    "keyPrefix": "smart-gallery"
+  }
 }
