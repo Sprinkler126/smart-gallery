@@ -787,7 +787,11 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.post('/analysis/test', requireAdmin, async (req, res) => {
     try {
-      const { apiEndpoint, apiKey, model } = req.body;
+      const { providerId } = req.body;
+      const provider = providerId ? aiAnalysisService.getProvider(providerId) : null;
+      const apiEndpoint = provider?.apiEndpoint || req.body.apiEndpoint;
+      const apiKey = provider?.apiKey || req.body.apiKey;
+      const model = provider?.model || req.body.model;
       
       if (!apiEndpoint || !apiKey) {
         return res.status(400).json({

@@ -4,7 +4,8 @@ import { adminFetch } from '../services/adminAuth';
 import { 
   Brain, Settings, Search, Tag, Image, 
   BarChart3, Sparkles, Loader2, X, ChevronRight,
-  Star, AlertCircle, CheckCircle, RefreshCw
+  Star, AlertCircle, CheckCircle, RefreshCw,
+  GripVertical, Plus, Trash2, Power, FlaskConical
 } from 'lucide-react';
 
 interface AIAnalysisPanelProps {
@@ -50,6 +51,20 @@ interface BatchJob {
   error?: string;
 }
 
+const normalizeProviderOrder = (providers: AIProviderConfig[]): AIProviderConfig[] =>
+  providers.map((provider, index) => ({
+    ...provider,
+    priority: index,
+  }));
+
+const buildProviderJson = (config: Pick<AIConfig, 'enableAutoAnalysis' | 'maxConcurrentAnalysis' | 'aiProviders'>) =>
+  JSON.stringify({
+    version: 1,
+    enableAutoAnalysis: config.enableAutoAnalysis,
+    maxConcurrentAnalysis: config.maxConcurrentAnalysis,
+    providers: normalizeProviderOrder(config.aiProviders),
+  }, null, 2);
+
 const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => {
   const [activeTab, setActiveTab] = useState<'analysis' | 'settings' | 'stats' | 'search'>(photo ? 'analysis' : 'search');
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
@@ -69,8 +84,9 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{success: boolean; message: string} | null>(null);
+  const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
+  const [providerTestResults, setProviderTestResults] = useState<Record<string, {success: boolean; message: string}>>({});
+  const [dragProviderId, setDragProviderId] = useState<string | null>(null);
   const [providerConfigJson, setProviderConfigJson] = useState('');
   const [providerConfigMessage, setProviderConfigMessage] = useState<{success: boolean; message: string} | null>(null);
   
@@ -105,20 +121,18 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
       const response = await fetch('/photowall/api/config');
       const data = await response.json();
       if (data.success) {
-        setConfig({
+        const nextConfig = {
           apiEndpoint: data.data.aiApiEndpoint || '',
           apiKey: data.data.aiApiKey ? '••••••••' : '',
           model: data.data.aiModel || 'multimodal-large',
           enableAutoAnalysis: data.data.enableAutoAnalysis || false,
           maxConcurrentAnalysis: data.data.maxConcurrentAnalysis || 2,
-          aiProviders: data.data.aiProviders || []
+          aiProviders: normalizeProviderOrder(data.data.aiProviders || [])
+        };
+        setConfig({
+          ...nextConfig
         });
-        setProviderConfigJson(JSON.stringify({
-          version: 1,
-          enableAutoAnalysis: data.data.enableAutoAnalysis || false,
-          maxConcurrentAnalysis: data.data.maxConcurrentAnalysis || 2,
-          providers: data.data.aiProviders || []
-        }, null, 2));
+        setProviderConfigJson(buildProviderJson(nextConfig));
       }
     } catch (err) {
       console.error('Failed to load config:', err);
@@ -169,6 +183,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setSaving(true);
     setSaveSuccess(false);
     try {
+      const orderedProviders = normalizeProviderOrder(config.aiProviders);
       const response = await adminFetch('/photowall/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -177,11 +192,14 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
           aiApiKey: config.apiKey === '••••••••' ? undefined : config.apiKey,
           aiModel: config.model,
           enableAutoAnalysis: config.enableAutoAnalysis,
-          maxConcurrentAnalysis: config.maxConcurrentAnalysis
+          maxConcurrentAnalysis: config.maxConcurrentAnalysis,
+          aiProviders: orderedProviders
         })
       });
       const data = await response.json();
       if (data.success) {
+        setConfig(prev => ({ ...prev, aiProviders: orderedProviders }));
+        setProviderConfigJson(buildProviderJson({ ...config, aiProviders: orderedProviders }));
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
       }
@@ -290,37 +308,105 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     loadStats();
   };
 
-  const testAPI = async () => {
-    if (!config.apiEndpoint || !config.apiKey || config.apiKey === '••••••••') {
-      setTestResult({ success: false, message: 'Please fill in API endpoint and key' });
+  const updateProviders = (updater: (providers: AIProviderConfig[]) => AIProviderConfig[]) => {
+    setConfig(prev => {
+      const nextProviders = normalizeProviderOrder(updater(prev.aiProviders));
+      const nextConfig = { ...prev, aiProviders: nextProviders };
+      setProviderConfigJson(buildProviderJson(nextConfig));
+      return nextConfig;
+    });
+  };
+
+  const addProvider = () => {
+    updateProviders(providers => [
+      ...providers,
+      {
+        id: `provider-${Date.now()}`,
+        name: `Provider ${providers.length + 1}`,
+        apiEndpoint: '',
+        apiKey: '',
+        model: config.model || 'multimodal-large',
+        enabled: true,
+        priority: providers.length,
+      }
+    ]);
+  };
+
+  const updateProvider = (id: string, updates: Partial<AIProviderConfig>) => {
+    updateProviders(providers => providers.map(provider =>
+      provider.id === id ? { ...provider, ...updates } : provider
+    ));
+  };
+
+  const removeProvider = (id: string) => {
+    updateProviders(providers => providers.filter(provider => provider.id !== id));
+    setProviderTestResults(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const moveProvider = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    updateProviders(providers => {
+      const fromIndex = providers.findIndex(provider => provider.id === fromId);
+      const toIndex = providers.findIndex(provider => provider.id === toId);
+      if (fromIndex === -1 || toIndex === -1) return providers;
+
+      const next = [...providers];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const testProvider = async (provider: AIProviderConfig) => {
+    if (!provider.apiEndpoint || !provider.apiKey) {
+      setProviderTestResults(prev => ({
+        ...prev,
+        [provider.id]: { success: false, message: 'Endpoint and API key are required' }
+      }));
       return;
     }
-    
-    setTesting(true);
-    setTestResult(null);
-    
+
+    setTestingProviderId(provider.id);
+    setProviderTestResults(prev => {
+      const next = { ...prev };
+      delete next[provider.id];
+      return next;
+    });
+
     try {
+      const isSavedMaskedProvider = provider.apiKey === '••••••••';
       const response = await adminFetch('/photowall/api/analysis/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiEndpoint: config.apiEndpoint,
-          apiKey: config.apiKey,
-          model: config.model
-        })
+        body: JSON.stringify(isSavedMaskedProvider
+          ? { providerId: provider.id }
+          : {
+              apiEndpoint: provider.apiEndpoint,
+              apiKey: provider.apiKey,
+              model: provider.model
+            })
       });
-      
       const data = await response.json();
-      
-      if (data.success) {
-        setTestResult({ success: true, message: `✅ ${data.message} (Model: ${data.model})` });
-      } else {
-        setTestResult({ success: false, message: `❌ ${data.error}` });
-      }
+      setProviderTestResults(prev => ({
+        ...prev,
+        [provider.id]: data.success
+          ? { success: true, message: `Connected (${data.model || provider.model})` }
+          : { success: false, message: data.error || 'Connection failed' }
+      }));
     } catch (err) {
-      setTestResult({ success: false, message: `❌ Test failed: ${err instanceof Error ? err.message : 'Unknown error'}` });
+      setProviderTestResults(prev => ({
+        ...prev,
+        [provider.id]: {
+          success: false,
+          message: err instanceof Error ? err.message : 'Connection failed'
+        }
+      }));
     } finally {
-      setTesting(false);
+      setTestingProviderId(null);
     }
   };
 
@@ -734,65 +820,176 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
 
   const renderSettings = () => (
     <div className="space-y-6">
-      <div>
-        <label className="block text-sm text-gray-400 mb-2">API Endpoint</label>
-        <input
-          type="text"
-          value={config.apiEndpoint}
-          onChange={(e) => setConfig({ ...config, apiEndpoint: e.target.value })}
-          placeholder="https://api.openai.com/v1/chat/completions"
-          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-gold"
-        />
-        <p className="text-xs text-gray-500 mt-1">
-          Your multimodal LLM API endpoint (OpenAI compatible)
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-medium text-white">AI Provider Queue</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            Drag providers to change fallback order. The first enabled provider is tried first.
+          </p>
+        </div>
+        <button
+          onClick={addProvider}
+          className="px-3 py-2 bg-gold text-obsidian rounded-lg hover:bg-gold/90 transition-colors flex items-center gap-2 text-sm"
+        >
+          <Plus size={16} />
+          Add API
+        </button>
       </div>
 
-      <div>
-        <label className="block text-sm text-gray-400 mb-2">API Key</label>
-        <input
-          type="password"
-          value={config.apiKey}
-          onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-          placeholder="sk-..."
-          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-gold"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm text-gray-400 mb-2">Model</label>
-        <input
-          type="text"
-          value={config.model}
-          onChange={(e) => setConfig({ ...config, model: e.target.value })}
-          placeholder="gpt-4-vision-preview"
-          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-gold"
-        />
-      </div>
-
-      <div className="flex items-center gap-3">
-        <input
-          type="checkbox"
-          id="autoAnalysis"
-          checked={config.enableAutoAnalysis}
-          onChange={(e) => setConfig({ ...config, enableAutoAnalysis: e.target.checked })}
-          className="w-4 h-4 rounded border-white/20 bg-white/5 text-gold"
-        />
-        <label htmlFor="autoAnalysis" className="text-sm text-gray-300">
-          Enable auto-analysis for new photos
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <label className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+          <input
+            type="checkbox"
+            id="autoAnalysis"
+            checked={config.enableAutoAnalysis}
+            onChange={(e) => {
+              const nextConfig = { ...config, enableAutoAnalysis: e.target.checked };
+              setConfig(nextConfig);
+              setProviderConfigJson(buildProviderJson(nextConfig));
+            }}
+            className="w-4 h-4 rounded border-white/20 bg-white/5 text-gold"
+          />
+          <span className="text-sm text-gray-300">Enable auto-analysis for new photos</span>
         </label>
+
+        <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+          <label className="block text-xs text-gray-500 mb-2">Auto-analysis concurrency</label>
+          <input
+            type="number"
+            min={1}
+            max={5}
+            value={config.maxConcurrentAnalysis}
+            onChange={(e) => {
+              const nextConfig = { ...config, maxConcurrentAnalysis: Math.max(1, Number(e.target.value) || 1) };
+              setConfig(nextConfig);
+              setProviderConfigJson(buildProviderJson(nextConfig));
+            }}
+            className="w-24 bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-gold"
+          />
+        </div>
       </div>
 
-      <div>
-        <label className="block text-sm text-gray-400 mb-2">Auto-analysis concurrency</label>
-        <input
-          type="number"
-          min={1}
-          max={5}
-          value={config.maxConcurrentAnalysis}
-          onChange={(e) => setConfig({ ...config, maxConcurrentAnalysis: Math.max(1, Number(e.target.value) || 1) })}
-          className="w-24 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-gold"
-        />
+      <div className="space-y-3">
+        {config.aiProviders.length === 0 ? (
+          <div className="border border-dashed border-white/15 rounded-lg p-8 text-center">
+            <Brain size={40} className="mx-auto text-gray-600 mb-3" />
+            <p className="text-white/80">No AI providers configured</p>
+            <p className="text-gray-500 text-sm mt-1">Add an OpenAI-compatible vision API to start automatic analysis.</p>
+          </div>
+        ) : (
+          config.aiProviders.map((provider, index) => {
+            const result = providerTestResults[provider.id];
+            const isTestingThis = testingProviderId === provider.id;
+
+            return (
+              <div
+                key={provider.id}
+                draggable
+                onDragStart={() => setDragProviderId(provider.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => {
+                  if (dragProviderId) moveProvider(dragProviderId, provider.id);
+                  setDragProviderId(null);
+                }}
+                onDragEnd={() => setDragProviderId(null)}
+                className={`border rounded-lg p-4 bg-white/[0.04] transition-colors ${
+                  dragProviderId === provider.id ? 'border-gold/70' : 'border-white/10'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <button
+                    className="mt-2 text-gray-500 hover:text-white cursor-grab"
+                    title="Drag to reorder"
+                  >
+                    <GripVertical size={18} />
+                  </button>
+
+                  <div className="flex-1 min-w-0 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs px-2 py-1 rounded bg-gold/20 text-gold">
+                        #{index + 1}
+                      </span>
+                      <input
+                        value={provider.name}
+                        onChange={(e) => updateProvider(provider.id, { name: e.target.value })}
+                        placeholder="Provider name"
+                        className="flex-1 min-w-40 bg-transparent border-b border-white/10 px-1 py-1 text-white font-medium focus:outline-none focus:border-gold"
+                      />
+                      <button
+                        onClick={() => updateProvider(provider.id, { enabled: !provider.enabled })}
+                        className={`p-2 rounded-lg transition-colors ${
+                          provider.enabled ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-gray-500'
+                        }`}
+                        title={provider.enabled ? 'Enabled' : 'Disabled'}
+                      >
+                        <Power size={16} />
+                      </button>
+                      <button
+                        onClick={() => removeProvider(provider.id)}
+                        className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                        title="Remove provider"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Endpoint</label>
+                        <input
+                          value={provider.apiEndpoint}
+                          onChange={(e) => updateProvider(provider.id, { apiEndpoint: e.target.value })}
+                          placeholder="https://api.openai.com/v1/chat/completions"
+                          className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Model</label>
+                        <input
+                          value={provider.model}
+                          onChange={(e) => updateProvider(provider.id, { model: e.target.value })}
+                          placeholder="gpt-4o-mini"
+                          className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">API Key</label>
+                      <input
+                        type="password"
+                        value={provider.apiKey}
+                        onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
+                        placeholder="sk-..."
+                        className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-gold"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => testProvider(provider)}
+                        disabled={isTestingThis}
+                        className="px-3 py-1.5 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors disabled:opacity-50 flex items-center gap-2 text-sm"
+                      >
+                        {isTestingThis ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <FlaskConical size={14} />
+                        )}
+                        Test
+                      </button>
+                      {result && (
+                        <span className={`text-xs ${result.success ? 'text-green-400' : 'text-red-400'}`}>
+                          {result.message}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       <div className="border border-white/10 rounded-lg p-4 space-y-3 bg-white/[0.03]">
@@ -846,31 +1043,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         </div>
       </div>
 
-      {/* Test Result */}
-      {testResult && (
-        <div className={`p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-          {testResult.message}
-        </div>
-      )}
-
       <div className="flex gap-3">
-        <button
-          onClick={testAPI}
-          disabled={testing || !config.apiEndpoint || !config.apiKey}
-          className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors disabled:opacity-50 flex items-center gap-2"
-        >
-          {testing ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              Testing...
-            </>
-          ) : (
-            <>
-              <Brain size={16} />
-              Test API
-            </>
-          )}
-        </button>
         <button
           onClick={saveConfig}
           disabled={saving}

@@ -150,6 +150,10 @@ export class AIAnalysisService {
     }));
   }
 
+  getProvider(providerId) {
+    return (this.config.providers || []).find(provider => provider.id === providerId) || null;
+  }
+
   getExportConfig() {
     return {
       version: 1,
