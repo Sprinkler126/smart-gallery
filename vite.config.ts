@@ -16,14 +16,12 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:3001',
             changeOrigin: true,
             secure: false,
-            rewrite: (path) => path.replace(/^\/photowall/, ''),
           },
           // Proxy Socket.IO connections
           '/photowall/socket.io': {
             target: 'http://localhost:3001',
             changeOrigin: true,
             ws: true,
-            rewrite: (path) => path.replace(/^\/photowall/, ''),
           },
         },
       },
