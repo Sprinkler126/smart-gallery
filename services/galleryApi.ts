@@ -4,6 +4,7 @@
  */
 
 import { Photo } from '../types';
+import { withAdminHeaders } from './adminAuth';
 
 // API base URL - can be configured for different environments
 // Use relative path with /photowall prefix for production
@@ -83,6 +84,7 @@ class GalleryApiService {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         headers: {
           'Content-Type': 'application/json',
+          ...withAdminHeaders(),
           ...options.headers,
         },
         ...options,

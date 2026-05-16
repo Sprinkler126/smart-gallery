@@ -5,6 +5,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { Photo } from '../types';
+import { getAdminToken } from './adminAuth';
 
 export type PhotoEvent = 'photo:added' | 'photo:removed' | 'photo:updated';
 export type GalleryEvent = 'gallery:refreshed' | 'gallery:stats';
@@ -42,6 +43,9 @@ class SocketService {
       
       this.socket = io(socketUrl, {
         path: '/photowall/socket.io',
+        auth: {
+          adminToken: getAdminToken(),
+        },
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: this.maxReconnectAttempts,

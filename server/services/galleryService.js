@@ -258,6 +258,10 @@ export class GalleryService extends EventEmitter {
         basePath: source.resolvedPath
       });
 
+      if (!photo) {
+        return;
+      }
+
       this.photos.set(photo.id, photo);
       source.photoCount++;
       

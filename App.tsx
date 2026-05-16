@@ -7,6 +7,7 @@ import TimelineView from './components/TimelineView';
 import AdminPanel from './components/AdminPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
 import Slideshow from './components/Slideshow';
+import { adminFetch } from './services/adminAuth';
 import { Grid, LayoutTemplate, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain } from 'lucide-react';
 
 // 检测是否为本地访问（只有本地才能看到管理入口）
@@ -238,7 +239,7 @@ const App: React.FC = () => {
 
   const handleDeletePhoto = async (photoId: string) => {
     try {
-      const response = await fetch(`/photowall/api/photo/${photoId}`, {
+      const response = await adminFetch(`/photowall/api/photo/${photoId}`, {
         method: 'DELETE',
       });
       
@@ -265,7 +266,7 @@ const App: React.FC = () => {
     try {
       console.log('🔄 Starting reset...');
       
-      const response = await fetch('/photowall/api/reset', {
+      const response = await adminFetch('/photowall/api/reset', {
         method: 'POST',
       });
       
@@ -327,7 +328,7 @@ const App: React.FC = () => {
 
     for (const photoId of idsToDelete) {
       try {
-        const response = await fetch(`/photowall/api/photo/${photoId}`, {
+        const response = await adminFetch(`/photowall/api/photo/${photoId}`, {
           method: 'DELETE',
         });
         const result = await response.json();

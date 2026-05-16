@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Photo, AIAnalysisResult } from '../types';
+import { adminFetch } from '../services/adminAuth';
 import { 
   Brain, Settings, Search, Tag, Image, 
   BarChart3, Sparkles, Loader2, X, ChevronRight,
@@ -16,6 +17,18 @@ interface AIConfig {
   apiKey: string;
   model: string;
   enableAutoAnalysis: boolean;
+  maxConcurrentAnalysis: number;
+  aiProviders: AIProviderConfig[];
+}
+
+interface AIProviderConfig {
+  id: string;
+  name: string;
+  apiEndpoint: string;
+  apiKey: string;
+  model: string;
+  enabled: boolean;
+  priority: number;
 }
 
 interface AnalysisStats {
@@ -24,6 +37,17 @@ interface AnalysisStats {
   averageAestheticScore: number;
   topCategories: [string, number][];
   topTags: [string, number][];
+}
+
+interface BatchJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  total: number;
+  completed: number;
+  failed: number;
+  currentPhotoId: string | null;
+  results: any[];
+  error?: string;
 }
 
 const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => {
@@ -35,7 +59,9 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     apiEndpoint: '',
     apiKey: '',
     model: 'multimodal-large',
-    enableAutoAnalysis: false
+    enableAutoAnalysis: false,
+    maxConcurrentAnalysis: 2,
+    aiProviders: []
   });
   const [stats, setStats] = useState<AnalysisStats | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,10 +71,13 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean; message: string} | null>(null);
+  const [providerConfigJson, setProviderConfigJson] = useState('');
+  const [providerConfigMessage, setProviderConfigMessage] = useState<{success: boolean; message: string} | null>(null);
   
   // Batch analysis state
   const [batchProgress, setBatchProgress] = useState<{current: number; total: number; photoId?: string} | null>(null);
   const [batchResults, setBatchResults] = useState<any[]>([]);
+  const [batchJob, setBatchJob] = useState<BatchJob | null>(null);
   const [unanalyzedPhotos, setUnanalyzedPhotos] = useState<Photo[]>([]);
   const [loadingUnanalyzed, setLoadingUnanalyzed] = useState(false);
 
@@ -80,8 +109,16 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
           apiEndpoint: data.data.aiApiEndpoint || '',
           apiKey: data.data.aiApiKey ? '••••••••' : '',
           model: data.data.aiModel || 'multimodal-large',
-          enableAutoAnalysis: data.data.enableAutoAnalysis || false
+          enableAutoAnalysis: data.data.enableAutoAnalysis || false,
+          maxConcurrentAnalysis: data.data.maxConcurrentAnalysis || 2,
+          aiProviders: data.data.aiProviders || []
         });
+        setProviderConfigJson(JSON.stringify({
+          version: 1,
+          enableAutoAnalysis: data.data.enableAutoAnalysis || false,
+          maxConcurrentAnalysis: data.data.maxConcurrentAnalysis || 2,
+          providers: data.data.aiProviders || []
+        }, null, 2));
       }
     } catch (err) {
       console.error('Failed to load config:', err);
@@ -114,7 +151,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setError(null);
     try {
       const url = `/photowall/api/analysis/${photo.id}${force ? '?force=true' : ''}`;
-      const response = await fetch(url, { method: 'POST' });
+      const response = await adminFetch(url, { method: 'POST' });
       const data = await response.json();
       if (data.success) {
         setAnalysis(data.data);
@@ -132,14 +169,15 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setSaving(true);
     setSaveSuccess(false);
     try {
-      const response = await fetch('/photowall/api/config', {
+      const response = await adminFetch('/photowall/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           aiApiEndpoint: config.apiEndpoint,
           aiApiKey: config.apiKey === '••••••••' ? undefined : config.apiKey,
           aiModel: config.model,
-          enableAutoAnalysis: config.enableAutoAnalysis
+          enableAutoAnalysis: config.enableAutoAnalysis,
+          maxConcurrentAnalysis: config.maxConcurrentAnalysis
         })
       });
       const data = await response.json();
@@ -203,34 +241,50 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     
     setBatchProgress({ current: 0, total: unanalyzedPhotos.length });
     setBatchResults([]);
-    
-    const results = [];
-    
-    for (let i = 0; i < unanalyzedPhotos.length; i++) {
-      const photo = unanalyzedPhotos[i];
-      setBatchProgress({ current: i + 1, total: unanalyzedPhotos.length, photoId: photo.id });
-      
-      try {
-        const response = await fetch(`/photowall/api/analysis/${photo.id}`, { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.success) {
-          results.push({ photo, success: true, analysis: data.data });
-        } else {
-          results.push({ photo, success: false, error: data.error });
+    setBatchJob(null);
+
+    try {
+      const startResponse = await adminFetch('/photowall/api/analysis/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoIds: unanalyzedPhotos.map(p => p.id) })
+      });
+      const startData = await startResponse.json();
+
+      if (!startData.success) {
+        throw new Error(startData.error || 'Failed to start batch analysis');
+      }
+
+      let job = startData.data as BatchJob;
+      setBatchJob(job);
+
+      while (job.status === 'queued' || job.status === 'running') {
+        setBatchProgress({
+          current: job.completed + job.failed,
+          total: job.total,
+          photoId: job.currentPhotoId || undefined
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        const jobResponse = await fetch(`/photowall/api/analysis/jobs/${job.id}`);
+        const jobData = await jobResponse.json();
+        if (!jobData.success) {
+          throw new Error(jobData.error || 'Failed to load analysis job');
         }
-      } catch (err) {
-        results.push({ photo, success: false, error: 'Network error' });
+        job = jobData.data as BatchJob;
+        setBatchJob(job);
       }
-      
-      // Small delay to avoid rate limiting
-      if (i < unanalyzedPhotos.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+
+      setBatchResults(job.results || []);
+    } catch (err) {
+      setBatchResults([{
+        success: false,
+        error: err instanceof Error ? err.message : 'Batch analysis failed'
+      }]);
+    } finally {
+      setBatchProgress(null);
     }
-    
-    setBatchResults(results);
-    setBatchProgress(null);
     
     // Refresh stats after batch analysis
     loadStats();
@@ -246,7 +300,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     setTestResult(null);
     
     try {
-      const response = await fetch('/photowall/api/analysis/test', {
+      const response = await adminFetch('/photowall/api/analysis/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -270,6 +324,65 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     }
   };
 
+  const exportProviderConfig = async () => {
+    setProviderConfigMessage(null);
+    try {
+      const response = await adminFetch('/photowall/api/analysis/config/export');
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Export failed');
+      }
+
+      const json = JSON.stringify(data.data, null, 2);
+      setProviderConfigJson(json);
+
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'smart-gallery-ai-providers.json';
+      link.click();
+      URL.revokeObjectURL(url);
+
+      setProviderConfigMessage({ success: true, message: 'Provider config exported' });
+    } catch (err) {
+      setProviderConfigMessage({
+        success: false,
+        message: err instanceof Error ? err.message : 'Export failed'
+      });
+    }
+  };
+
+  const importProviderConfig = async () => {
+    setProviderConfigMessage(null);
+    try {
+      const parsed = JSON.parse(providerConfigJson);
+      const response = await adminFetch('/photowall/api/analysis/config/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed)
+      });
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Import failed');
+      }
+
+      setProviderConfigMessage({ success: true, message: 'Provider config imported' });
+      await loadConfig();
+    } catch (err) {
+      setProviderConfigMessage({
+        success: false,
+        message: err instanceof Error ? err.message : 'Import failed'
+      });
+    }
+  };
+
+  const importProviderConfigFile = async (file: File | null) => {
+    if (!file) return;
+    const text = await file.text();
+    setProviderConfigJson(text);
+  };
+
   const performSearch = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
@@ -288,7 +401,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
 
   const clearCache = async () => {
     try {
-      await fetch('/photowall/api/analysis/cache', { method: 'DELETE' });
+      await adminFetch('/photowall/api/analysis/cache', { method: 'DELETE' });
       setAnalysis(null);
       setStats(null);
     } catch (err) {
@@ -668,6 +781,69 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         <label htmlFor="autoAnalysis" className="text-sm text-gray-300">
           Enable auto-analysis for new photos
         </label>
+      </div>
+
+      <div>
+        <label className="block text-sm text-gray-400 mb-2">Auto-analysis concurrency</label>
+        <input
+          type="number"
+          min={1}
+          max={5}
+          value={config.maxConcurrentAnalysis}
+          onChange={(e) => setConfig({ ...config, maxConcurrentAnalysis: Math.max(1, Number(e.target.value) || 1) })}
+          className="w-24 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-gold"
+        />
+      </div>
+
+      <div className="border border-white/10 rounded-lg p-4 space-y-3 bg-white/[0.03]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-medium text-white">Provider Queue JSON</h4>
+            <p className="text-xs text-gray-500 mt-1">
+              Providers are tried by priority; failed calls automatically fall back to the next enabled provider.
+            </p>
+          </div>
+          <span className="text-xs text-gray-500 whitespace-nowrap">
+            {config.aiProviders.filter(p => p.enabled).length} enabled
+          </span>
+        </div>
+
+        <textarea
+          value={providerConfigJson}
+          onChange={(e) => setProviderConfigJson(e.target.value)}
+          spellCheck={false}
+          className="w-full min-h-48 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-gold"
+        />
+
+        {providerConfigMessage && (
+          <div className={`p-3 rounded-lg text-sm ${providerConfigMessage.success ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+            {providerConfigMessage.message}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={exportProviderConfig}
+            className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors"
+          >
+            Export JSON
+          </button>
+          <label className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors cursor-pointer">
+            Import File
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => importProviderConfigFile(e.target.files?.[0] || null)}
+            />
+          </label>
+          <button
+            onClick={importProviderConfig}
+            className="px-4 py-2 bg-gold text-obsidian rounded-lg hover:bg-gold/90 transition-colors"
+          >
+            Apply JSON
+          </button>
+        </div>
       </div>
 
       {/* Test Result */}

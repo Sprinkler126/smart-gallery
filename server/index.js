@@ -109,13 +109,53 @@ galleryService.on('photoAdded', (photo) => {
   io.emit('photo:added', {
     id: photo.id,
     url: `/photowall/api/image/${photo.id}`,
+    originalUrl: `/photowall/api/image/${photo.id}`,
     thumbnail: `/photowall/api/thumbnail/${photo.id}`,
     title: photo.title,
     category: photo.category,
     date: photo.date,
     location: photo.location,
-    exif: photo.exif
+    exif: photo.exif,
+    dimensions: photo.dimensions,
+    sourceId: photo.sourceId
   });
+
+  const autoAnalysis = aiAnalysisService.enqueueAutoAnalysis(photo, {
+    onStart: (queuedPhoto) => {
+      io.emit('analysis:auto:start', {
+        photoId: queuedPhoto.id,
+        title: queuedPhoto.title
+      });
+    },
+    onComplete: (queuedPhoto, analysis) => {
+      io.emit('analysis:auto:complete', {
+        photoId: queuedPhoto.id,
+        title: queuedPhoto.title,
+        analyzedAt: analysis.analyzedAt,
+        tags: analysis.tags || [],
+        category: analysis.category,
+        description: analysis.description
+      });
+    },
+    onError: (queuedPhoto, error) => {
+      io.emit('analysis:auto:error', {
+        photoId: queuedPhoto.id,
+        title: queuedPhoto.title,
+        error: error.message
+      });
+    }
+  });
+
+  if (autoAnalysis.queued) {
+    io.emit('analysis:auto:queued', {
+      photoId: photo.id,
+      title: photo.title,
+      queueLength: autoAnalysis.queueLength,
+      active: autoAnalysis.active
+    });
+  } else if (autoAnalysis.reason !== 'cached') {
+    console.log(`🧠 Auto-analysis skipped for ${photo.title}: ${autoAnalysis.reason}`);
+  }
 });
 
 galleryService.on('photoRemoved', (photoId) => {
@@ -126,12 +166,15 @@ galleryService.on('photoUpdated', (photo) => {
   io.emit('photo:updated', {
     id: photo.id,
     url: `/photowall/api/image/${photo.id}`,
+    originalUrl: `/photowall/api/image/${photo.id}`,
     thumbnail: `/photowall/api/thumbnail/${photo.id}`,
     title: photo.title,
     category: photo.category,
     date: photo.date,
     location: photo.location,
-    exif: photo.exif
+    exif: photo.exif,
+    dimensions: photo.dimensions,
+    sourceId: photo.sourceId
   });
 });
 
@@ -189,6 +232,36 @@ app.use((err, req, res, next) => {
   });
 });
 
+const adminToken = process.env.ADMIN_TOKEN || config.adminToken || '';
+const getHostName = (value = '') => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    return new URL(trimmed).hostname;
+  } catch {
+    return trimmed.split(':')[0].replace(/^\[|\]$/g, '');
+  }
+};
+const isLocalOrPrivateHost = (hostname) => {
+  const host = (hostname || '').toLowerCase();
+  if (!host) return false;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+  if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
+  const match = host.match(/^172\.(\d+)\./);
+  return !!match && Number(match[1]) >= 16 && Number(match[1]) <= 31;
+};
+const isAdminSocket = (socket) => {
+  const suppliedToken =
+    socket.handshake.auth?.adminToken ||
+    socket.handshake.headers['x-admin-token'] ||
+    '';
+  if (adminToken && suppliedToken === adminToken) return true;
+
+  const originHost = getHostName(socket.handshake.headers.origin || '');
+  const requestHost = getHostName(socket.handshake.headers.host || '');
+  return isLocalOrPrivateHost(originHost || requestHost);
+};
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log(`📱 Client connected: ${socket.id}`);
@@ -202,6 +275,10 @@ io.on('connection', (socket) => {
 
   // Allow clients to request refresh
   socket.on('gallery:refresh', async () => {
+    if (!isAdminSocket(socket)) {
+      socket.emit('gallery:error', { error: 'Admin access required' });
+      return;
+    }
     await galleryService.refreshAll();
   });
 });

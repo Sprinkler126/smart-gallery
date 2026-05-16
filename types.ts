@@ -1,7 +1,7 @@
 export interface Photo {
   id: string;
   url: string;
-  originalUrl: string;  // Full resolution original image
+  originalUrl?: string;  // Full resolution original image
   thumbnail: string;
   blurPlaceholder?: string; // Base64 encoded tiny blurred image for LQIP
   title: string;
@@ -9,17 +9,19 @@ export interface Photo {
   date: string;
   location?: string;
   exif?: {
-    camera: string;
-    lens: string;
-    aperture: string;
-    shutter: string;
-    iso: string;
+    camera?: string;
+    lens?: string;
+    aperture?: string;
+    shutter?: string;
+    iso?: string;
+    focalLength?: string;
   };
   dimensions?: {
     width: number;
     height: number;
     format: string;
   };
+  sourceId?: string;
 }
 
 export interface AIAnalysisResult {

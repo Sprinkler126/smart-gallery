@@ -13,6 +13,100 @@ const fetch = globalThis.fetch || (await import('node-fetch')).default;
 
 export function createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config) {
   const router = Router();
+  const adminToken = process.env.ADMIN_TOKEN || config.adminToken || '';
+
+  const getHostName = (value = '') => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    try {
+      return new URL(trimmed).hostname;
+    } catch {
+      return trimmed.split(':')[0].replace(/^\[|\]$/g, '');
+    }
+  };
+
+  const isLocalOrPrivateHost = (hostname) => {
+    const host = (hostname || '').toLowerCase();
+    if (!host) return false;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+    if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
+    const match = host.match(/^172\.(\d+)\./);
+    return !!match && Number(match[1]) >= 16 && Number(match[1]) <= 31;
+  };
+
+  const isAdminRequest = (req) => {
+    const suppliedToken =
+      req.get('x-admin-token') ||
+      (req.get('authorization') || '').replace(/^Bearer\s+/i, '') ||
+      req.query.adminToken ||
+      '';
+
+    if (adminToken && suppliedToken === adminToken) {
+      return true;
+    }
+
+    const originHost = getHostName(req.get('origin') || req.get('referer') || '');
+    const requestHost = getHostName(req.get('host') || '');
+    return isLocalOrPrivateHost(originHost || requestHost);
+  };
+
+  const requireAdmin = (req, res, next) => {
+    if (isAdminRequest(req)) {
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: adminToken
+        ? 'Admin token required'
+        : 'Admin access is restricted to local/private hosts. Set ADMIN_TOKEN to allow authorized remote admin requests.'
+    });
+  };
+
+  const normalizeImportedProviders = (providers = []) => {
+    const existing = new Map((config.aiProviders || []).map(provider => [provider.id, provider]));
+
+    return providers.map((provider, index) => {
+      const id = provider.id || `provider-${index + 1}`;
+      const existingProvider = existing.get(id) || {};
+      const apiKey = provider.apiKey === '••••••••'
+        ? existingProvider.apiKey || ''
+        : provider.apiKey || '';
+
+      return {
+        id,
+        name: provider.name || id,
+        apiEndpoint: provider.apiEndpoint || provider.endpoint || '',
+        apiKey,
+        model: provider.model || 'multimodal-large',
+        enabled: provider.enabled !== false,
+        priority: Number.isFinite(Number(provider.priority)) ? Number(provider.priority) : index
+      };
+    });
+  };
+
+  const applyAiConfig = async (updates) => {
+    if (updates.aiApiEndpoint !== undefined) config.aiApiEndpoint = updates.aiApiEndpoint;
+    if (updates.aiApiKey !== undefined && updates.aiApiKey !== '••••••••') config.aiApiKey = updates.aiApiKey;
+    if (updates.aiModel !== undefined) config.aiModel = updates.aiModel;
+    if (updates.enableAutoAnalysis !== undefined) config.enableAutoAnalysis = updates.enableAutoAnalysis;
+    if (updates.maxConcurrentAnalysis !== undefined) config.maxConcurrentAnalysis = updates.maxConcurrentAnalysis;
+    if (updates.aiProviders !== undefined || updates.providers !== undefined) {
+      config.aiProviders = normalizeImportedProviders(updates.aiProviders || updates.providers || []);
+    }
+
+    aiAnalysisService.updateRuntimeConfig({
+      aiApiEndpoint: config.aiApiEndpoint,
+      aiApiKey: config.aiApiKey,
+      aiModel: config.aiModel,
+      enableAutoAnalysis: config.enableAutoAnalysis,
+      maxConcurrentAnalysis: config.maxConcurrentAnalysis,
+      aiProviders: config.aiProviders || []
+    });
+
+    const configPath = path.resolve('./server/config.json');
+    await fs.writeJson(configPath, config, { spaces: 2 });
+  };
 
   // ==================== PHOTOS ====================
 
@@ -283,7 +377,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/sources
    * Add a new image source
    */
-  router.post('/sources', async (req, res) => {
+  router.post('/sources', requireAdmin, async (req, res) => {
     try {
       const { id, name, type = 'local', path: sourcePath, enabled = true, defaultCategory = 'General', useFolderAsCategory = true, watch = true } = req.body;
 
@@ -330,7 +424,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * PUT /api/sources/:id
    * Update an image source
    */
-  router.put('/sources/:id', async (req, res) => {
+  router.put('/sources/:id', requireAdmin, async (req, res) => {
     try {
       const source = await galleryService.updateSource(req.params.id, req.body);
       
@@ -359,7 +453,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * DELETE /api/sources/:id
    * Remove an image source
    */
-  router.delete('/sources/:id', async (req, res) => {
+  router.delete('/sources/:id', requireAdmin, async (req, res) => {
     try {
       await galleryService.removeSource(req.params.id);
       res.json({
@@ -378,7 +472,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/sources/:id/scan
    * Trigger a scan for a specific source
    */
-  router.post('/sources/:id/scan', async (req, res) => {
+  router.post('/sources/:id/scan', requireAdmin, async (req, res) => {
     try {
       const images = await galleryService.scanSource(req.params.id);
       res.json({
@@ -419,7 +513,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/refresh
    * Trigger a full refresh of all sources
    */
-  router.post('/refresh', async (req, res) => {
+  router.post('/refresh', requireAdmin, async (req, res) => {
     try {
       await galleryService.refreshAll();
       const stats = galleryService.getStats();
@@ -440,7 +534,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/reset
    * Reset: clear all thumbnail cache and rebuild from scratch
    */
-  router.post('/reset', async (req, res) => {
+  router.post('/reset', requireAdmin, async (req, res) => {
     try {
       console.log('🔄 Starting full reset...');
       
@@ -487,7 +581,9 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
           aiApiEndpoint: config.aiApiEndpoint || '',
           aiApiKey: config.aiApiKey ? '••••••••' : '',
           aiModel: config.aiModel || 'multimodal-large',
-          enableAutoAnalysis: config.enableAutoAnalysis || false
+          enableAutoAnalysis: config.enableAutoAnalysis || false,
+          maxConcurrentAnalysis: config.maxConcurrentAnalysis || 2,
+          aiProviders: aiAnalysisService.getSafeProviders()
         }
       });
     } catch (error) {
@@ -504,7 +600,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * DELETE /api/photo/:id
    * Delete a photo (both original file and thumbnail)
    */
-  router.delete('/photo/:id', async (req, res) => {
+  router.delete('/photo/:id', requireAdmin, async (req, res) => {
     try {
       const photo = galleryService.getPhoto(req.params.id);
       
@@ -564,7 +660,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/cache/clean
    * Clean up old cached thumbnails
    */
-  router.post('/cache/clean', async (req, res) => {
+  router.post('/cache/clean', requireAdmin, async (req, res) => {
     try {
       const { validHashes } = req.body || {};
       const cleaned = await galleryService.imageProcessor.cleanupCache(validHashes || []);
@@ -585,7 +681,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * PUT /api/config
    * Update configuration
    */
-  router.put('/config', async (req, res) => {
+  router.put('/config', requireAdmin, async (req, res) => {
     try {
       const { appName, photographerName } = req.body;
       
@@ -593,15 +689,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       if (photographerName) config.photographerName = photographerName;
       
       // AI Analysis config
-      const { aiApiEndpoint, aiApiKey, aiModel, enableAutoAnalysis } = req.body;
-      if (aiApiEndpoint !== undefined) config.aiApiEndpoint = aiApiEndpoint;
-      if (aiApiKey !== undefined && aiApiKey !== '••••••••') config.aiApiKey = aiApiKey;
-      if (aiModel !== undefined) config.aiModel = aiModel;
-      if (enableAutoAnalysis !== undefined) config.enableAutoAnalysis = enableAutoAnalysis;
-
-      // Save config to file
-      const configPath = path.resolve('./server/config.json');
-      await fs.writeJson(configPath, config, { spaces: 2 });
+      await applyAiConfig(req.body);
 
       res.json({
         success: true,
@@ -611,7 +699,9 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
           photographerName: config.photographerName,
           aiApiEndpoint: config.aiApiEndpoint,
           aiModel: config.aiModel,
-          enableAutoAnalysis: config.enableAutoAnalysis
+          enableAutoAnalysis: config.enableAutoAnalysis,
+          maxConcurrentAnalysis: config.maxConcurrentAnalysis || 2,
+          aiProviders: aiAnalysisService.getSafeProviders()
         }
       });
     } catch (error) {
@@ -651,7 +741,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/orientations/clear
    * Clear orientation cache
    */
-  router.post('/orientations/clear', async (req, res) => {
+  router.post('/orientations/clear', requireAdmin, async (req, res) => {
     try {
       const result = await orientationService.clearCache();
       res.json({
@@ -695,7 +785,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/analysis/test
    * Test AI API connection with a simple request
    */
-  router.post('/analysis/test', async (req, res) => {
+  router.post('/analysis/test', requireAdmin, async (req, res) => {
     try {
       const { apiEndpoint, apiKey, model } = req.body;
       
@@ -752,7 +842,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * POST /api/analysis/batch
    * Batch analyze multiple photos
    */
-  router.post('/analysis/batch', async (req, res) => {
+  router.post('/analysis/batch', requireAdmin, async (req, res) => {
     try {
       const { photoIds } = req.body;
       
@@ -774,18 +864,11 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         .map(id => galleryService.getPhoto(id))
         .filter(Boolean);
 
-      const results = await aiAnalysisService.analyzeBatch(photos, (current, total, photo, analysis) => {
-        // Emit progress via WebSocket if needed
-        // io.emit('analysis:progress', { current, total, photoId: photo.id });
-      });
+      const job = aiAnalysisService.createBatchJob(photos);
 
       res.json({
         success: true,
-        data: {
-          total: photos.length,
-          completed: results.filter(r => r !== null).length,
-          results
-        }
+        data: job
       });
     } catch (error) {
       console.error('Error in batch analysis:', error);
@@ -861,13 +944,6 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.get('/analysis/stats', (req, res) => {
     try {
-      if (!aiAnalysisService.isAvailable()) {
-        return res.status(503).json({
-          success: false,
-          error: 'AI analysis not configured'
-        });
-      }
-
       const stats = aiAnalysisService.getStats();
       
       res.json({
@@ -887,7 +963,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * DELETE /api/analysis/cache
    * Clear AI analysis cache
    */
-  router.delete('/analysis/cache', async (req, res) => {
+  router.delete('/analysis/cache', requireAdmin, async (req, res) => {
     try {
       await aiAnalysisService.clearCache();
       
@@ -961,6 +1037,107 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
   });
 
   /**
+   * GET /api/analysis/jobs
+   * Get recent server-side batch analysis jobs
+   */
+  router.get('/analysis/jobs', (req, res) => {
+    try {
+      res.json({
+        success: true,
+        data: aiAnalysisService.getRecentBatchJobs()
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/analysis/jobs/:jobId
+   * Get a server-side batch analysis job
+   */
+  router.get('/analysis/jobs/:jobId', (req, res) => {
+    try {
+      const job = aiAnalysisService.getBatchJob(req.params.jobId);
+      if (!job) {
+        return res.status(404).json({
+          success: false,
+          error: 'Analysis job not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: job
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/analysis/config/export
+   * Export AI provider queue config, including API keys.
+   */
+  router.get('/analysis/config/export', requireAdmin, (req, res) => {
+    try {
+      res.json({
+        success: true,
+        data: aiAnalysisService.getExportConfig()
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /api/analysis/config/import
+   * Import AI provider queue config from JSON.
+   */
+  router.post('/analysis/config/import', requireAdmin, async (req, res) => {
+    try {
+      const imported = req.body?.data || req.body || {};
+      const providers = imported.providers || imported.aiProviders;
+
+      if (!Array.isArray(providers)) {
+        return res.status(400).json({
+          success: false,
+          error: 'AI config JSON must include a providers array'
+        });
+      }
+
+      await applyAiConfig({
+        enableAutoAnalysis: imported.enableAutoAnalysis,
+        maxConcurrentAnalysis: imported.maxConcurrentAnalysis,
+        aiProviders: providers
+      });
+
+      res.json({
+        success: true,
+        message: 'AI provider config imported',
+        data: {
+          enableAutoAnalysis: config.enableAutoAnalysis,
+          maxConcurrentAnalysis: config.maxConcurrentAnalysis || 2,
+          aiProviders: aiAnalysisService.getSafeProviders()
+        }
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
    * GET /api/analysis/:id
    * Get AI analysis for a specific photo
    * NOTE: Must be defined AFTER specific routes to avoid catching them as IDs
@@ -976,10 +1153,18 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         });
       }
 
+      const cachedAnalysis = aiAnalysisService.getCachedAnalysis(photo);
+      if (cachedAnalysis) {
+        return res.json({
+          success: true,
+          data: cachedAnalysis
+        });
+      }
+
       if (!aiAnalysisService.isAvailable()) {
         return res.status(503).json({
           success: false,
-          error: 'AI analysis not configured'
+          error: 'AI analysis not configured and no cached analysis available'
         });
       }
 
@@ -1004,7 +1189,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * Query params: ?force=true to force re-analysis
    * NOTE: Must be defined AFTER specific routes to avoid catching them as IDs
    */
-  router.post('/analysis/:id', async (req, res) => {
+  router.post('/analysis/:id', requireAdmin, async (req, res) => {
     try {
       const photo = galleryService.getPhoto(req.params.id);
       

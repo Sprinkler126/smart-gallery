@@ -14,6 +14,7 @@ import crypto from 'crypto';
 
 export class AIAnalysisService {
   constructor(config = {}) {
+    const providers = this.normalizeProviders(config);
     this.config = {
       // API Configuration - User can customize these
       apiEndpoint: config.aiApiEndpoint || process.env.AI_API_ENDPOINT || '',
@@ -39,11 +40,16 @@ export class AIAnalysisService {
         technical: true,      // Technical feedback
       },
       
-      ...config
+      ...config,
+      providers
     };
     
     this.analysisQueue = [];
     this.isProcessing = false;
+    this.autoAnalysisQueue = [];
+    this.autoAnalysisQueuedKeys = new Set();
+    this.activeAutoAnalyses = 0;
+    this.batchJobs = new Map();
     this.cache = new Map(); // In-memory cache
     this.cacheLoaded = false;
     
@@ -87,7 +93,117 @@ export class AIAnalysisService {
    * Check if AI analysis is configured and available
    */
   isAvailable() {
-    return !!(this.config.apiEndpoint && this.config.apiKey);
+    return this.getAvailableProviders().length > 0;
+  }
+
+  normalizeProviders(config = {}) {
+    const configured = Array.isArray(config.aiProviders) ? config.aiProviders : [];
+    const providers = configured
+      .map((provider, index) => ({
+        id: provider.id || `provider-${index + 1}`,
+        name: provider.name || provider.id || `Provider ${index + 1}`,
+        apiEndpoint: provider.apiEndpoint || provider.endpoint || '',
+        apiKey: provider.apiKey || provider.key || '',
+        model: provider.model || config.aiModel || process.env.AI_MODEL || 'multimodal-large',
+        enabled: provider.enabled !== false,
+        priority: Number.isFinite(Number(provider.priority)) ? Number(provider.priority) : index
+      }))
+      .filter(provider => provider.apiEndpoint || provider.apiKey || provider.model);
+
+    const legacyEndpoint = config.aiApiEndpoint || process.env.AI_API_ENDPOINT || '';
+    const legacyKey = config.aiApiKey || process.env.AI_API_KEY || '';
+    const legacyModel = config.aiModel || process.env.AI_MODEL || 'multimodal-large';
+
+    if (providers.length === 0 && (legacyEndpoint || legacyKey)) {
+      const hasLegacyProvider = providers.some(provider => provider.id === 'legacy-primary');
+      if (!hasLegacyProvider) {
+        providers.unshift({
+          id: 'legacy-primary',
+          name: 'Primary',
+          apiEndpoint: legacyEndpoint,
+          apiKey: legacyKey,
+          model: legacyModel,
+          enabled: true,
+          priority: -1
+        });
+      }
+    }
+
+    return providers.sort((a, b) => a.priority - b.priority);
+  }
+
+  getAvailableProviders() {
+    return (this.config.providers || [])
+      .filter(provider => provider.enabled !== false && provider.apiEndpoint && provider.apiKey)
+      .sort((a, b) => a.priority - b.priority);
+  }
+
+  getSafeProviders() {
+    return (this.config.providers || []).map(provider => ({
+      id: provider.id,
+      name: provider.name,
+      apiEndpoint: provider.apiEndpoint,
+      apiKey: provider.apiKey ? '••••••••' : '',
+      model: provider.model,
+      enabled: provider.enabled !== false,
+      priority: provider.priority
+    }));
+  }
+
+  getExportConfig() {
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      enableAutoAnalysis: this.config.enableAutoAnalysis,
+      maxConcurrentAnalysis: this.config.maxConcurrent,
+      providers: (this.config.providers || []).map(provider => ({
+        id: provider.id,
+        name: provider.name,
+        apiEndpoint: provider.apiEndpoint,
+        apiKey: provider.apiKey,
+        model: provider.model,
+        enabled: provider.enabled !== false,
+        priority: provider.priority
+      }))
+    };
+  }
+
+  /**
+   * Update runtime config after /config saves AI settings.
+   */
+  updateRuntimeConfig(updates = {}) {
+    if (updates.aiApiEndpoint !== undefined) {
+      this.config.apiEndpoint = updates.aiApiEndpoint;
+    }
+    if (updates.aiApiKey !== undefined) {
+      this.config.apiKey = updates.aiApiKey;
+    }
+    if (updates.aiModel !== undefined) {
+      this.config.model = updates.aiModel || 'multimodal-large';
+    }
+    if (updates.enableAutoAnalysis !== undefined) {
+      this.config.enableAutoAnalysis = updates.enableAutoAnalysis;
+    }
+    if (updates.maxConcurrentAnalysis !== undefined) {
+      this.config.maxConcurrent = updates.maxConcurrentAnalysis;
+    }
+    if (updates.aiProviders !== undefined || updates.providers !== undefined) {
+      this.config.providers = this.normalizeProviders({
+        ...this.config,
+        aiApiEndpoint: this.config.apiEndpoint,
+        aiApiKey: this.config.apiKey,
+        aiModel: this.config.model,
+        aiProviders: updates.aiProviders || updates.providers || []
+      });
+    } else {
+      this.config.providers = this.normalizeProviders({
+        ...this.config,
+        aiApiEndpoint: this.config.apiEndpoint,
+        aiApiKey: this.config.apiKey,
+        aiModel: this.config.model,
+        aiProviders: this.config.providers || []
+      });
+    }
   }
 
   /**
@@ -222,6 +338,7 @@ export class AIAnalysisService {
     const features = this.config.features;
     
     let prompt = 'Analyze this image and provide the following information in JSON format. All text fields must be in Chinese (中文):\n\n';
+    prompt += 'Important: Do not invent locations, landmarks, camera context, events, or identities. If a place is not clearly recognizable, describe only visible content and say the exact location is uncertain. If you mention a known landmark or city, it must be based on clear visual evidence.\n\n';
     
     if (features.tags) {
       prompt += '- tags: Array of 5-10 descriptive tags in Chinese (标签，如：海景, 日落, 山脉, 人物, 建筑, 美食, 动物, 植物, 城市, 自然, 室内, 户外, 白天, 夜晚, 彩色, 黑白)\n';
@@ -255,7 +372,33 @@ export class AIAnalysisService {
    * This is a template - users can customize for their specific API
    */
   async callAIAPI(base64Image, mimeType, prompt) {
-    const { apiEndpoint, apiKey, model } = this.config;
+    const providers = this.getAvailableProviders();
+    const errors = [];
+
+    if (providers.length === 0) {
+      throw new Error('AI analysis not configured. Please configure at least one enabled provider.');
+    }
+
+    for (const provider of providers) {
+      try {
+        console.log(`   Trying AI provider: ${provider.name || provider.id} (${provider.model})`);
+        const result = await this.callProviderAPI(provider, base64Image, mimeType, prompt);
+        if (errors.length > 0) {
+          console.log(`   ✅ Fallback provider succeeded: ${provider.name || provider.id}`);
+        }
+        return result;
+      } catch (error) {
+        const message = `${provider.name || provider.id}: ${error.message}`;
+        errors.push(message);
+        console.warn(`   ⚠️ AI provider failed, trying next: ${message}`);
+      }
+    }
+
+    throw new Error(`All AI providers failed: ${errors.join(' | ')}`);
+  }
+
+  async callProviderAPI(provider, base64Image, mimeType, prompt) {
+    const { apiEndpoint, apiKey, model } = provider;
 
     // Template for OpenAI-compatible API
     const requestBody = {
@@ -420,8 +563,183 @@ export class AIAnalysisService {
   }
 
   /**
+   * Queue a photo for automatic background analysis.
+   * Used by file watchers after a new image has been processed.
+   */
+  enqueueAutoAnalysis(photo, callbacks = {}) {
+    if (!this.config.enableAutoAnalysis) {
+      return { queued: false, reason: 'disabled' };
+    }
+
+    if (!this.isAvailable()) {
+      return { queued: false, reason: 'not_configured' };
+    }
+
+    const cacheKey = this.getCacheKey(photo.id, photo.originalPath);
+    if (this.cache.has(cacheKey)) {
+      return { queued: false, reason: 'cached' };
+    }
+
+    if (this.autoAnalysisQueuedKeys.has(cacheKey)) {
+      return { queued: false, reason: 'already_queued' };
+    }
+
+    this.autoAnalysisQueuedKeys.add(cacheKey);
+    this.autoAnalysisQueue.push({
+      photo,
+      cacheKey,
+      callbacks,
+      queuedAt: new Date().toISOString()
+    });
+
+    this.drainAutoAnalysisQueue();
+    return {
+      queued: true,
+      queueLength: this.autoAnalysisQueue.length,
+      active: this.activeAutoAnalyses
+    };
+  }
+
+  drainAutoAnalysisQueue() {
+    const maxConcurrent = Math.max(1, Number(this.config.maxConcurrent) || 1);
+
+    while (this.activeAutoAnalyses < maxConcurrent && this.autoAnalysisQueue.length > 0) {
+      const task = this.autoAnalysisQueue.shift();
+      this.activeAutoAnalyses++;
+
+      task.callbacks.onStart?.(task.photo);
+
+      this.analyzeImage(task.photo)
+        .then((analysis) => {
+          task.callbacks.onComplete?.(task.photo, analysis);
+        })
+        .catch((error) => {
+          task.callbacks.onError?.(task.photo, error);
+        })
+        .finally(() => {
+          this.activeAutoAnalyses--;
+          this.autoAnalysisQueuedKeys.delete(task.cacheKey);
+
+          // Leave a short gap between batches to be friendlier to API rate limits.
+          setTimeout(() => this.drainAutoAnalysisQueue(), 500);
+        });
+    }
+  }
+
+  getAutoAnalysisStats() {
+    return {
+      enabled: this.config.enableAutoAnalysis,
+      available: this.isAvailable(),
+      queued: this.autoAnalysisQueue.length,
+      active: this.activeAutoAnalyses,
+      maxConcurrent: Math.max(1, Number(this.config.maxConcurrent) || 1)
+    };
+  }
+
+  /**
+   * Create a background batch analysis job.
+   * The job runs server-side, so the browser can close and poll later.
+   */
+  createBatchJob(photos) {
+    const id = crypto.randomUUID();
+    const job = {
+      id,
+      status: 'queued',
+      total: photos.length,
+      completed: 0,
+      failed: 0,
+      currentPhotoId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      results: []
+    };
+
+    this.batchJobs.set(id, job);
+    this.processBatchJob(id, photos);
+    return this.getBatchJob(id);
+  }
+
+  async processBatchJob(jobId, photos) {
+    const job = this.batchJobs.get(jobId);
+    if (!job) return;
+
+    job.status = 'running';
+    job.updatedAt = new Date().toISOString();
+
+    try {
+      for (const photo of photos) {
+        job.currentPhotoId = photo.id;
+        job.updatedAt = new Date().toISOString();
+
+        try {
+          const analysis = await this.analyzeImage(photo);
+          job.completed++;
+          job.results.push({
+            photoId: photo.id,
+            title: photo.title,
+            success: true,
+            analyzedAt: analysis.analyzedAt
+          });
+        } catch (error) {
+          job.failed++;
+          job.results.push({
+            photoId: photo.id,
+            title: photo.title,
+            success: false,
+            error: error.message
+          });
+        }
+
+        job.updatedAt = new Date().toISOString();
+
+        if (job.completed + job.failed < job.total) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      job.status = 'completed';
+      job.currentPhotoId = null;
+      job.updatedAt = new Date().toISOString();
+    } catch (error) {
+      job.status = 'failed';
+      job.error = error.message;
+      job.currentPhotoId = null;
+      job.updatedAt = new Date().toISOString();
+    }
+  }
+
+  getBatchJob(jobId) {
+    const job = this.batchJobs.get(jobId);
+    if (!job) return null;
+    return {
+      id: job.id,
+      status: job.status,
+      total: job.total,
+      completed: job.completed,
+      failed: job.failed,
+      currentPhotoId: job.currentPhotoId,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      error: job.error,
+      results: job.results
+    };
+  }
+
+  getRecentBatchJobs(limit = 10) {
+    return Array.from(this.batchJobs.values())
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, limit)
+      .map(job => this.getBatchJob(job.id));
+  }
+
+  /**
    * Get analysis for a photo (from cache or analyze)
    */
+  getCachedAnalysis(photo) {
+    const cacheKey = this.getCacheKey(photo.id, photo.originalPath);
+    return this.cache.get(cacheKey) || null;
+  }
+
   async getAnalysis(photo) {
     const cacheKey = this.getCacheKey(photo.id, photo.originalPath);
     
@@ -547,7 +865,8 @@ export class AIAnalysisService {
       averageQualityScore: analyses.reduce((sum, a) => sum + (a.quality?.score || 0), 0) / analyses.length || 0,
       averageAestheticScore: analyses.reduce((sum, a) => sum + (a.aesthetic?.score || 0), 0) / analyses.length || 0,
       topCategories: this.getTopCategories(analyses),
-      topTags: this.getTopTags(analyses)
+      topTags: this.getTopTags(analyses),
+      autoAnalysis: this.getAutoAnalysisStats()
     };
   }
 
