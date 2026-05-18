@@ -107,58 +107,180 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const kenBurnsCache    = useRef<Map<number, KenBurnsTransform>>(new Map());
   const audioRef         = useRef<HTMLAudioElement | null>(null);
 
-  // ★ 图片预加载缓存 - LRU 机制，限制大小防止内存无限增长
-  const MAX_CACHE_SIZE = 100; // 最多缓存 100 张图片
-  const preloadedUrls    = useRef<Set<string>>(new Set());
-  const imageCache       = useRef<Map<string, HTMLImageElement>>(new Map()); // 使用 Map 保持插入顺序
+  // ================================================================
+  // ★ 分级图片缓存系统
+  // L1: 缩略图 - 常驻内存，数量多但体积小
+  // L2: 预览图 (800px) - LRU 缓存，中等数量
+  // L3: 高清原图 - 严格限制数量，用完即释放
+  // ================================================================
+  
+  // L1: 缩略图缓存 - 常驻内存，可存 500+ 张
+  const THUMB_CACHE_SIZE = 500;
+  const thumbCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const thumbUrls = useRef<Set<string>>(new Set());
+  
+  // L2: 预览图缓存 (800px) - LRU，最多 50 张
+  const PREVIEW_CACHE_SIZE = 50;
+  const previewCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const previewUrls = useRef<Set<string>>(new Set());
+  
+  // L3: 高清原图缓存 - 严格限制最多 5 张（当前显示 + 预加载）
+  const FULL_CACHE_SIZE = 5;
+  const fullCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const fullUrls = useRef<Set<string>>(new Set());
+  
+  // 统一的预加载 URL 集合（用于快速检查）
+  const preloadedUrls = useRef<Set<string>>(new Set());
 
-  // ★ LRU 缓存管理：添加图片到缓存，自动淘汰最旧的
-  const addToImageCache = useCallback((key: string, img: HTMLImageElement) => {
-    // 如果已存在，先删除（后面会重新添加到末尾 = 最近使用）
-    if (imageCache.current.has(key)) {
-      imageCache.current.delete(key);
+  // ★ 添加缩略图到 L1 缓存
+  const addToThumbCache = useCallback((key: string, img: HTMLImageElement) => {
+    if (thumbCache.current.has(key)) {
+      thumbCache.current.delete(key);
     }
-    
-    // 如果超过限制，删除最旧的条目
-    while (imageCache.current.size >= MAX_CACHE_SIZE) {
-      const firstKey = imageCache.current.keys().next().value;
+    while (thumbCache.current.size >= THUMB_CACHE_SIZE) {
+      const firstKey = thumbCache.current.keys().next().value;
       if (firstKey) {
-        imageCache.current.delete(firstKey);
+        thumbCache.current.delete(firstKey);
+        thumbUrls.current.delete(firstKey);
         preloadedUrls.current.delete(firstKey);
       }
     }
-    
-    // 添加到末尾（最近使用）
-    imageCache.current.set(key, img);
+    thumbCache.current.set(key, img);
+    thumbUrls.current.add(key);
     preloadedUrls.current.add(key);
   }, []);
 
-  // ★ 启动时清空缓存
+  // ★ 添加预览图到 L2 缓存
+  const addToPreviewCache = useCallback((key: string, img: HTMLImageElement) => {
+    if (previewCache.current.has(key)) {
+      previewCache.current.delete(key);
+    }
+    while (previewCache.current.size >= PREVIEW_CACHE_SIZE) {
+      const firstKey = previewCache.current.keys().next().value;
+      if (firstKey) {
+        previewCache.current.delete(firstKey);
+        previewUrls.current.delete(firstKey);
+        preloadedUrls.current.delete(firstKey);
+      }
+    }
+    previewCache.current.set(key, img);
+    previewUrls.current.add(key);
+    preloadedUrls.current.add(key);
+  }, []);
+
+  // ★ 添加高清图到 L3 缓存（严格限制）
+  const addToFullCache = useCallback((key: string, img: HTMLImageElement) => {
+    if (fullCache.current.has(key)) {
+      fullCache.current.delete(key);
+    }
+    while (fullCache.current.size >= FULL_CACHE_SIZE) {
+      const firstKey = fullCache.current.keys().next().value;
+      if (firstKey) {
+        fullCache.current.delete(firstKey);
+        fullUrls.current.delete(firstKey);
+        preloadedUrls.current.delete(firstKey);
+      }
+    }
+    fullCache.current.set(key, img);
+    fullUrls.current.add(key);
+    preloadedUrls.current.add(key);
+  }, []);
+
+  // ★ 从缓存获取图片（按优先级）
+  const getFromCache = useCallback((key: string): HTMLImageElement | undefined => {
+    // 优先高清图
+    if (fullCache.current.has(key)) {
+      const img = fullCache.current.get(key)!;
+      // 更新 LRU 顺序
+      fullCache.current.delete(key);
+      fullCache.current.set(key, img);
+      return img;
+    }
+    // 其次预览图
+    if (previewCache.current.has(key)) {
+      const img = previewCache.current.get(key)!;
+      previewCache.current.delete(key);
+      previewCache.current.set(key, img);
+      return img;
+    }
+    // 最后缩略图
+    if (thumbCache.current.has(key)) {
+      const img = thumbCache.current.get(key)!;
+      thumbCache.current.delete(key);
+      thumbCache.current.set(key, img);
+      return img;
+    }
+    return undefined;
+  }, []);
+
+  // ★ 启动时清空所有缓存
   useEffect(() => {
+    thumbCache.current.clear();
+    thumbUrls.current.clear();
+    previewCache.current.clear();
+    previewUrls.current.clear();
+    fullCache.current.clear();
+    fullUrls.current.clear();
     preloadedUrls.current.clear();
-    imageCache.current.clear();
     kenBurnsCache.current.clear();
   }, []);
 
-  // ★ 定时清理：每 30 分钟清理一次，保留最近 50 张
+  // ★ 定时清理：每 30 分钟清理一次
   useEffect(() => {
     const CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 分钟
-    const KEEP_RECENT = 50; // 保留最近 50 张
     
     const interval = setInterval(() => {
-      if (imageCache.current.size > KEEP_RECENT) {
-        const entries = Array.from(imageCache.current.entries());
-        const toDelete = entries.slice(0, entries.length - KEEP_RECENT);
+      const beforeSize = preloadedUrls.current.size;
+      
+      // 清理缩略图：保留最近 300 张
+      if (thumbCache.current.size > 300) {
+        const entries = Array.from(thumbCache.current.entries());
+        const toDelete = entries.slice(0, entries.length - 300);
         toDelete.forEach(([key]) => {
-          imageCache.current.delete(key);
+          thumbCache.current.delete(key);
+          thumbUrls.current.delete(key);
           preloadedUrls.current.delete(key);
         });
-        console.log(`🧹 Cache cleanup: removed ${toDelete.length} items, ${imageCache.current.size} remaining`);
+      }
+      
+      // 清理预览图：保留最近 30 张
+      if (previewCache.current.size > 30) {
+        const entries = Array.from(previewCache.current.entries());
+        const toDelete = entries.slice(0, entries.length - 30);
+        toDelete.forEach(([key]) => {
+          previewCache.current.delete(key);
+          previewUrls.current.delete(key);
+          preloadedUrls.current.delete(key);
+        });
+      }
+      
+      // 高清图保持严格限制，不额外清理
+      
+      const afterSize = preloadedUrls.current.size;
+      if (beforeSize !== afterSize) {
+        console.log(`🧹 Cache cleanup: ${beforeSize} → ${afterSize} items (thumb=${thumbCache.current.size}, preview=${previewCache.current.size}, full=${fullCache.current.size})`);
       }
     }, CLEANUP_INTERVAL);
     
     return () => clearInterval(interval);
   }, []);
+
+  // ★ 旧的 LRU 缓存管理（兼容代码，逐步迁移）
+  const MAX_CACHE_SIZE = 100;
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const addToImageCache = useCallback((key: string, img: HTMLImageElement) => {
+    // 根据 key 前缀判断类型
+    if (key.startsWith('thumb:')) {
+      addToThumbCache(key, img);
+    } else if (key.startsWith('preview:')) {
+      addToPreviewCache(key, img);
+    } else if (key.startsWith('full:')) {
+      addToFullCache(key, img);
+    } else {
+      // 默认放入预览缓存
+      addToPreviewCache(key, img);
+    }
+  }, [addToThumbCache, addToPreviewCache, addToFullCache]);
 
   // ★ 核心：用一个 ref 保存自动播放需要读取的所有"最新值"
   // 这样定时器回调永远读到最新状态，不需要重建定时器
@@ -204,64 +326,104 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     }
   }, [isRandomOrder, generateShuffledIndices]);
   
-  // ★ 智能预加载：优先下一张，当前图加载完后再预加载后续
-  const PRELOAD_AHEAD = 3; // 减少预加载数量，优先保证当前和下一张
+  // ★ 智能预加载：分级策略，严格限制高清图数量
+  // L1: 缩略图 - 预加载前后 10 张
+  // L2: 预览图 - 预加载前后 3 张
+  // L3: 高清原图 - 严格限制最多 5 张（当前 + 前后各 2 张）
+  const PRELOAD_THUMB_AHEAD = 10;  // 缩略图预加载范围
+  const PRELOAD_PREVIEW_AHEAD = 3; // 预览图预加载范围
+  const MAX_FULL_PRELOAD = 5;      // 高清图最大预加载数量
+  
   const qualityRef = useRef(imageQuality);
   useEffect(() => { qualityRef.current = imageQuality; }, [imageQuality]);
+  
+  // 跟踪正在加载的高清图数量
+  const loadingFullCount = useRef(0);
+  const fullPreloadQueue = useRef<string[]>([]);
 
   const preloadRange = useCallback((centerIdx: number, list: Photo[]) => {
     const len = list.length;
     if (len <= 1) return;
     const quality = qualityRef.current;
 
-    // 优先预加载下一张（缩略图 + 原图）
-    const nextIdx = (centerIdx + 1) % len;
-    const nextPhoto = list[nextIdx];
-    if (nextPhoto) {
-      const nextUrl = quality === 'original' && nextPhoto.originalUrl ? nextPhoto.originalUrl : nextPhoto.url;
+    // ========== L1: 缩略图预加载（前后 10 张）==========
+    for (let offset = 1; offset <= PRELOAD_THUMB_AHEAD; offset++) {
+      const idx = (centerIdx + offset) % len;
+      const photo = list[idx];
+      if (!photo || !photo.thumbnail) continue;
       
-      // 下一张缩略图（高优先级）
-      const nextThumbKey = `thumb:${nextUrl}`;
-      if (!preloadedUrls.current.has(nextThumbKey) && nextPhoto.thumbnail) {
+      const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
+      const thumbKey = `thumb:${photoUrl}`;
+      
+      if (!thumbUrls.current.has(thumbKey)) {
         const tImg = new window.Image();
-        tImg.src = nextPhoto.thumbnail;
-        tImg.onload = () => {
-          addToImageCache(nextThumbKey, tImg);
-        };
-      }
-      
-      // 下一张原图（中等优先级，延迟一点）
-      const nextFullKey = `full:${nextUrl}`;
-      if (!preloadedUrls.current.has(nextFullKey)) {
-        setTimeout(() => {
-          const fImg = new window.Image();
-          fImg.src = nextUrl;
-          fImg.onload = () => {
-            addToImageCache(nextFullKey, fImg);
-          };
-        }, 500);
+        tImg.src = photo.thumbnail;
+        tImg.onload = () => addToThumbCache(thumbKey, tImg);
       }
     }
 
-    // 预加载更后面的（仅缩略图，低优先级）
-    for (let offset = 2; offset <= PRELOAD_AHEAD; offset++) {
+    // ========== L2: 预览图预加载（前后 3 张）==========
+    for (let offset = 1; offset <= PRELOAD_PREVIEW_AHEAD; offset++) {
       const idx = (centerIdx + offset) % len;
       const photo = list[idx];
       if (!photo) continue;
-
+      
       const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
+      const previewKey = `preview:${photoUrl}`;
+      
+      // 如果后端支持预览图尺寸，这里可以加载 800px 版本
+      // 目前先用缩略图作为预览图
+      if (!previewUrls.current.has(previewKey) && photo.thumbnail) {
+        const pImg = new window.Image();
+        pImg.src = photo.thumbnail;
+        pImg.onload = () => addToPreviewCache(previewKey, pImg);
+      }
+    }
 
-      // 只预加载缩略图，不预加载原图（节省带宽）
-      const thumbKey = `thumb:${photoUrl}`;
-      if (!preloadedUrls.current.has(thumbKey) && photo.thumbnail) {
-        const tImg = new window.Image();
-        tImg.src = photo.thumbnail;
-        tImg.onload = () => {
-          addToImageCache(thumbKey, tImg);
+    // ========== L3: 高清原图预加载（严格限制 5 张）==========
+    // 计算需要预加载的高清图索引
+    const fullIndices: number[] = [];
+    for (let offset = 1; offset <= 2; offset++) { // 只预加载前后各 2 张
+      fullIndices.push((centerIdx + offset) % len);
+      fullIndices.push((centerIdx - offset + len) % len);
+    }
+    
+    // 限制高清图缓存大小
+    while (fullCache.current.size >= MAX_FULL_PRELOAD) {
+      const firstKey = fullCache.current.keys().next().value;
+      if (firstKey) {
+        fullCache.current.delete(firstKey);
+        fullUrls.current.delete(firstKey);
+        preloadedUrls.current.delete(firstKey);
+      }
+    }
+    
+    // 加载高清图（限制并发）
+    for (const idx of fullIndices) {
+      if (loadingFullCount.current >= 2) break; // 最多同时加载 2 张高清图
+      
+      const photo = list[idx];
+      if (!photo) continue;
+      
+      const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
+      const fullKey = `full:${photoUrl}`;
+      
+      if (!fullUrls.current.has(fullKey)) {
+        loadingFullCount.current++;
+        const fImg = new window.Image();
+        fImg.src = photoUrl;
+        fImg.onload = () => {
+          addToFullCache(fullKey, fImg);
+          loadingFullCount.current--;
+        };
+        fImg.onerror = () => {
+          loadingFullCount.current--;
         };
       }
     }
-  }, []);
+    
+    console.log(`📦 Preload: thumb=${thumbCache.current.size}, preview=${previewCache.current.size}, full=${fullCache.current.size} (loading: ${loadingFullCount.current})`);
+  }, [addToThumbCache, addToPreviewCache, addToFullCache]);
 
   useEffect(() => { playStateRef.current.isPlaying = isPlaying; }, [isPlaying]);
   useEffect(() => { playStateRef.current.intervalSec = intervalSec; }, [intervalSec]);
@@ -500,13 +662,13 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
     // ② 并行加载缩略图和原图（真正的异步）
     
-    // 加载缩略图（独立，不阻塞）
-    if (currentPhoto.thumbnail && !preloadedUrls.current.has(thumbKey)) {
+    // 加载缩略图（独立，不阻塞）- 使用 L1 缓存
+    if (currentPhoto.thumbnail && !thumbUrls.current.has(thumbKey)) {
       const tImg = new window.Image();
       tImg.src = currentPhoto.thumbnail;
       tImg.onload = () => {
         if (cancelled) return;
-        addToImageCache(thumbKey, tImg);
+        addToThumbCache(thumbKey, tImg);
         setThumbnailLoaded(true);
         thumbLoadTimeRef.current = Date.now();
       };
@@ -530,13 +692,13 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }, remaining);
     };
 
-    // 加载原图（独立，不阻塞）
-    if (!preloadedUrls.current.has(fullKey)) {
+    // 加载原图（独立，不阻塞）- 使用 L3 缓存
+    if (!fullUrls.current.has(fullKey)) {
       const fImg = new window.Image();
       fImg.src = effectiveUrl;
       fImg.onload = () => {
         if (cancelled) return;
-        addToImageCache(fullKey, fImg);
+        addToFullCache(fullKey, fImg);
         // ★ 原图加载完成，但等待最小显示时间
         waitForMinDisplay(() => {
           if (!cancelled) {
@@ -552,8 +714,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       };
     } else {
       // 原图已缓存，更新 LRU 顺序，然后等待最小显示时间
-      const cachedImg = imageCache.current.get(fullKey);
-      if (cachedImg) addToImageCache(fullKey, cachedImg);
+      const cachedImg = fullCache.current.get(fullKey);
+      if (cachedImg) addToFullCache(fullKey, cachedImg);
       waitForMinDisplay(() => {
         if (!cancelled) {
           setDisplayedUrl(effectiveUrl);
@@ -563,7 +725,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     }
 
     return () => { cancelled = true; };
-  }, [safeIndex, effectiveUrl, currentPhoto?.thumbnail]);
+  }, [safeIndex, effectiveUrl, currentPhoto?.thumbnail, addToThumbCache, addToFullCache]);
 
   // ⑤ 预加载后续照片（当前照片有任何一张加载到位就开始）
   useEffect(() => {
@@ -606,10 +768,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     const fullKey = `full:${nextUrl}`;
 
     // 检查是否已缓存
-    if (preloadedUrls.current.has(fullKey)) {
+    if (fullUrls.current.has(fullKey)) {
       // 更新 LRU 顺序
-      const cachedImg = imageCache.current.get(fullKey);
-      if (cachedImg) addToImageCache(fullKey, cachedImg);
+      const cachedImg = fullCache.current.get(fullKey);
+      if (cachedImg) addToFullCache(fullKey, cachedImg);
       setNextImageReady(true);
       // 如果之前因为等待而暂停，恢复播放
       if (!isPlaying) {
@@ -625,7 +787,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     const fImg = new window.Image();
     fImg.src = nextUrl;
     fImg.onload = () => {
-      addToImageCache(fullKey, fImg);
+      addToFullCache(fullKey, fImg);
       setNextImageReady(true);
       // 加载完成，恢复播放
       setIsPlaying(true);
@@ -639,7 +801,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     return () => {
       // 清理，但让图片继续加载（不 abort）
     };
-  }, [safeIndex, filteredPhotos, transition, isRandomOrder, shuffledIndices, imageQuality, isPlaying]);
+  }, [safeIndex, filteredPhotos, transition, isRandomOrder, shuffledIndices, imageQuality, isPlaying, addToFullCache]);
 
   /* ================================================================ */
   /*  加载 orientations                                                */
@@ -739,11 +901,35 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   }, [onClose, navigate, showControlsBriefly]);
 
   /* ================================================================ */
-  /*  Cleanup                                                          */
+  /*  Cleanup - 幻灯片关闭时彻底清理所有资源                          */
   /* ================================================================ */
   useEffect(() => () => {
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
+    
+    // ★ 清理音频
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    
+    // ★ 清理所有图片缓存
+    thumbCache.current.clear();
+    thumbUrls.current.clear();
+    previewCache.current.clear();
+    previewUrls.current.clear();
+    fullCache.current.clear();
+    fullUrls.current.clear();
+    preloadedUrls.current.clear();
+    imageCache.current.clear();
+    kenBurnsCache.current.clear();
+    
+    // ★ 清理预加载队列
+    fullPreloadQueue.current = [];
+    loadingFullCount.current = 0;
+    
+    console.log('🧹 Slideshow cleanup: all resources released');
   }, []);
 
   /* ================================================================ */
@@ -877,6 +1063,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={true}
                   particleCount={particleLevel}
+                  shouldDestroy={false}
                 />
               )}
               {/* 缩略图（半透明叠加在粒子上） */}
@@ -961,6 +1148,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   thumbnailUrl={currentPhoto.thumbnail}
                   visible={!imageLoaded && particleLevel > 0}
                   particleCount={particleLevel}
+                  shouldDestroy={imageLoaded || particleLevel === 0}
                 />
                 {/* 缩略图（半透明叠加在粒子上） */}
                 {!imageLoaded && thumbnailLoaded && (

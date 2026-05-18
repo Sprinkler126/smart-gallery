@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, ChevronLeft, ChevronRight, Info, MapPin, Camera, Aperture, ImageOff, ZoomIn, ZoomOut, Trash2, Brain } from 'lucide-react';
 import { Photo } from '../types';
 
@@ -87,11 +87,24 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
 
   // Zoom controls
   const zoomIn = () => setZoom(prev => Math.min(prev * 1.2, 5));
-  const zoomOut = () => setZoom(prev => Math.max(prev / 1.2, 1));
+  const zoomOut = () => setZoom(prev => {
+    const newZoom = Math.max(prev / 1.2, 1);
+    return newZoom;
+  });
   const resetZoom = () => {
     setZoom(1);
     setPosition({ x: 0, y: 0 });
   };
+  
+  // ★ 方案 A: 当缩放从 >1 变为 1 时，自动平滑重置位置
+  const prevZoomRef = useRef(zoom);
+  useEffect(() => {
+    // 从放大状态回到正常大小时，自动重置位置
+    if (prevZoomRef.current > 1 && zoom === 1) {
+      setPosition({ x: 0, y: 0 });
+    }
+    prevZoomRef.current = zoom;
+  }, [zoom]);
 
   // Wheel zoom - use native event listener with passive: false
   useEffect(() => {
@@ -145,10 +158,16 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
     setIsDragging(false);
   };
 
-  // Double click to reset
+  // ★ 方案 C: 双击快速重置，带平滑动画
+  const [isResetting, setIsResetting] = useState(false);
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    resetZoom();
+    if (zoom > 1 || position.x !== 0 || position.y !== 0) {
+      setIsResetting(true);
+      resetZoom();
+      // 动画结束后清除状态
+      setTimeout(() => setIsResetting(false), 300);
+    }
   };
 
   // Touch support for mobile
@@ -286,7 +305,7 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
         onTouchEnd={handleTouchEnd}
       >
         <div 
-          className="relative transition-transform duration-100 ease-out flex items-center justify-center"
+          className={`relative flex items-center justify-center ${isResetting ? 'transition-all duration-300 ease-out' : 'transition-transform duration-100 ease-out'}`}
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
             transformOrigin: 'center center',

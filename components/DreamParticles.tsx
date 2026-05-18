@@ -7,7 +7,7 @@
  * - 形成"从粒子逐渐凝聚成高清照片"的视觉效果
  * - 照片区域外保持干净（无粒子）
  */
-import React, { useEffect, useRef, useCallback, memo } from 'react';
+import React, { useEffect, useRef, useCallback, memo, useState } from 'react';
 
 interface SandParticle {
   x: number;
@@ -29,6 +29,11 @@ interface DreamParticlesProps {
   thumbnailUrl: string;
   visible: boolean;
   particleCount?: number; // 粒子数量等级：1-10，默认5
+  /**
+   * 当为 true 时，组件完全卸载并清理所有资源
+   * 用于幻灯片退出时彻底释放内存
+   */
+  shouldDestroy?: boolean;
 }
 
 // 基础配置（粒子数量可调节）
@@ -122,7 +127,40 @@ function calcContainRect(
   return { x: offsetX, y: offsetY, w: drawW, h: drawH };
 }
 
-function DreamParticles({ thumbnailUrl, visible, particleCount = 5 }: DreamParticlesProps) {
+// 全局粒子系统管理器 - 用于跟踪所有粒子实例
+class ParticleSystemManager {
+  private static instance: ParticleSystemManager;
+  private activeSystems: Set<string> = new Set();
+  private totalParticles: number = 0;
+
+  static getInstance(): ParticleSystemManager {
+    if (!ParticleSystemManager.instance) {
+      ParticleSystemManager.instance = new ParticleSystemManager();
+    }
+    return ParticleSystemManager.instance;
+  }
+
+  register(systemId: string, particleCount: number) {
+    this.activeSystems.add(systemId);
+    this.totalParticles += particleCount;
+  }
+
+  unregister(systemId: string, particleCount: number) {
+    this.activeSystems.delete(systemId);
+    this.totalParticles = Math.max(0, this.totalParticles - particleCount);
+  }
+
+  getStats() {
+    return {
+      activeSystems: this.activeSystems.size,
+      totalParticles: this.totalParticles,
+    };
+  }
+}
+
+const particleManager = ParticleSystemManager.getInstance();
+
+function DreamParticles({ thumbnailUrl, visible, particleCount = 5, shouldDestroy = false }: DreamParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<SandParticle[]>([]);
   const animRef = useRef<number>(0);
@@ -133,6 +171,10 @@ function DreamParticles({ thumbnailUrl, visible, particleCount = 5 }: DreamParti
   const drawRectRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
   // 缓存配置
   const configRef = useRef(getConfig(particleCount));
+  // 系统唯一ID
+  const systemIdRef = useRef(`particle-system-${Math.random().toString(36).substr(2, 9)}`);
+  // 是否已注册到管理器
+  const isRegisteredRef = useRef(false);
 
   // 粒子数量变化时更新配置
   useEffect(() => {
@@ -261,10 +303,41 @@ function DreamParticles({ thumbnailUrl, visible, particleCount = 5 }: DreamParti
     animRef.current = requestAnimationFrame(animate);
   }, []);
 
+  // ★ 完全清理函数 - 释放所有资源
+  const cleanup = useCallback(() => {
+    // 取消动画
+    if (animRef.current) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = 0;
+    }
+    
+    // 清空粒子数据
+    particlesRef.current = [];
+    isReadyRef.current = false;
+    
+    // 清空 canvas
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+    
+    // 从管理器注销
+    if (isRegisteredRef.current) {
+      particleManager.unregister(systemIdRef.current, particlesRef.current.length);
+      isRegisteredRef.current = false;
+    }
+    
+    console.log(`🏜️ DreamParticles destroyed: ${systemIdRef.current}`);
+  }, []);
+
   // 初始化粒子
   useEffect(() => {
-    if (!thumbnailUrl || !visible) {
-      isReadyRef.current = false;
+    // ★ 如果要求销毁，不初始化
+    if (shouldDestroy || !thumbnailUrl || !visible) {
+      cleanup();
       return;
     }
 
@@ -371,26 +444,36 @@ function DreamParticles({ thumbnailUrl, visible, particleCount = 5 }: DreamParti
         particlesRef.current = particles;
         isReadyRef.current = true;
         startTimeRef.current = performance.now();
+        
+        // ★ 注册到管理器
+        particleManager.register(systemIdRef.current, particles.length);
+        isRegisteredRef.current = true;
+        
+        console.log(`🏜️ DreamParticles initialized: ${systemIdRef.current}, particles=${particles.length}, total=${particleManager.getStats().totalParticles}`);
       }); // end requestAnimationFrame
     }; // end img.onload
 
-    return () => { cancelled = true; isReadyRef.current = false; };
-  }, [thumbnailUrl, visible, particleCount]);
+    return () => { 
+      cancelled = true; 
+      cleanup();
+    };
+  }, [thumbnailUrl, visible, particleCount, shouldDestroy, cleanup]);
 
   // 动画控制
   useEffect(() => {
-    if (!visible) {
-      cancelAnimationFrame(animRef.current);
-      particlesRef.current = [];
-      isReadyRef.current = false;
+    // ★ 如果要求销毁，不启动动画
+    if (shouldDestroy || !visible) {
+      cleanup();
       return;
     }
+    
     lastFrameRef.current = 0;
     animRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animRef.current);
-  }, [visible, animate]);
+    return () => cleanup();
+  }, [visible, animate, shouldDestroy, cleanup]);
 
-  if (!visible) return null;
+  // ★ 如果要求销毁，返回 null 不渲染
+  if (shouldDestroy || !visible) return null;
 
   return (
     <canvas
