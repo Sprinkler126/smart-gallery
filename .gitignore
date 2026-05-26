@@ -25,6 +25,7 @@ dist-ssr
 
 # Server cache
 server/cache/
+server/data/
 
 # Environment variables (sensitive data)
 .env

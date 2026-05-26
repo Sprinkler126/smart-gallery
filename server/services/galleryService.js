@@ -10,9 +10,10 @@ import { EventEmitter } from 'events';
 import ImageProcessor from './imageProcessor.js';
 
 export class GalleryService extends EventEmitter {
-  constructor(config) {
+  constructor(config, databaseService = null) {
     super();
     this.config = config;
+    this.database = databaseService;
     this.sources = new Map();
     this.photos = new Map();
     this.watchers = new Map();
@@ -27,6 +28,15 @@ export class GalleryService extends EventEmitter {
    */
   async initialize() {
     console.log('🖼️  Initializing Gallery Service...');
+
+    if (this.database) {
+      for (const photo of this.database.getPhotos()) {
+        this.photos.set(photo.id, photo);
+      }
+      if (this.photos.size > 0) {
+        console.log(`   Loaded ${this.photos.size} photos from SQLite catalog`);
+      }
+    }
     
     for (const source of this.config.imageSources) {
       if (source.enabled) {
@@ -70,6 +80,7 @@ export class GalleryService extends EventEmitter {
       lastScanned: null,
       status: 'idle'
     });
+    this.database?.upsertSource(this.sources.get(id));
 
     // Scan the source
     await this.scanSource(id);
@@ -100,6 +111,7 @@ export class GalleryService extends EventEmitter {
     }
 
     this.sources.delete(sourceId);
+    this.database?.removePhotosBySource(sourceId);
     this.emit('sourceRemoved', sourceId);
   }
 
@@ -163,14 +175,26 @@ export class GalleryService extends EventEmitter {
         source.useFolderAsCategory
       );
 
+      const activeIds = new Set(images.map(image => image.id));
+      for (const [photoId, photo] of this.photos) {
+        if (photo.sourceId === sourceId && !activeIds.has(photoId)) {
+          this.photos.delete(photoId);
+          this.emit('photoRemoved', photoId);
+        }
+      }
+
       // Update photos map
       for (const image of images) {
         this.photos.set(image.id, image);
+        this.database?.upsertPhoto(image);
       }
+
+      this.database?.markMissingPhotosForSource(sourceId, [...activeIds]);
 
       source.photoCount = images.length;
       source.lastScanned = new Date().toISOString();
       source.status = 'ready';
+      this.database?.upsertSource(source);
 
       this.emit('scanComplete', sourceId, images.length);
       console.log(`✅ Scanned ${images.length} images from ${source.name}`);
@@ -179,6 +203,7 @@ export class GalleryService extends EventEmitter {
     } catch (error) {
       source.status = 'error';
       source.error = error.message;
+      this.database?.upsertSource(source);
       this.emit('scanError', sourceId, error);
       throw error;
     }
@@ -262,8 +287,13 @@ export class GalleryService extends EventEmitter {
         return;
       }
 
+      const existed = this.photos.has(photo.id);
       this.photos.set(photo.id, photo);
-      source.photoCount++;
+      this.database?.upsertPhoto(photo);
+      if (!existed) {
+        source.photoCount++;
+      }
+      this.database?.upsertSource(source);
       
       this.emit('photoAdded', photo);
     } catch (error) {
@@ -279,7 +309,10 @@ export class GalleryService extends EventEmitter {
     for (const [photoId, photo] of this.photos) {
       if (photo.originalPath === filePath) {
         await this.processNewImage(sourceId, filePath);
-        this.emit('photoUpdated', this.photos.get(photoId));
+        const updatedPhoto = this.photos.get(photoId);
+        if (updatedPhoto) {
+          this.emit('photoUpdated', updatedPhoto);
+        }
         return;
       }
     }
@@ -294,8 +327,12 @@ export class GalleryService extends EventEmitter {
     for (const [photoId, photo] of this.photos) {
       if (photo.originalPath === filePath && photo.sourceId === sourceId) {
         this.photos.delete(photoId);
+        this.database?.removePhoto(photoId);
         const source = this.sources.get(sourceId);
-        if (source) source.photoCount--;
+        if (source) {
+          source.photoCount--;
+          this.database?.upsertSource(source);
+        }
         this.emit('photoRemoved', photoId);
         return;
       }
@@ -384,7 +421,13 @@ export class GalleryService extends EventEmitter {
    * Get a single photo by ID
    */
   getPhoto(photoId) {
-    return this.photos.get(photoId);
+    const photo = this.photos.get(photoId);
+    if (photo) return photo;
+    const persisted = this.database?.getPhoto(photoId);
+    if (persisted) {
+      this.photos.set(photoId, persisted);
+    }
+    return persisted;
   }
 
   /**
@@ -458,6 +501,7 @@ export class GalleryService extends EventEmitter {
           this.photos.delete(photoId);
         }
       }
+      this.database?.removePhotosBySource(sourceId);
       await this.scanSource(sourceId);
     }
 
@@ -467,6 +511,7 @@ export class GalleryService extends EventEmitter {
     }
 
     this.emit('sourceUpdated', source);
+    this.database?.upsertSource(source);
     return source;
   }
 
@@ -477,11 +522,13 @@ export class GalleryService extends EventEmitter {
     const photo = this.photos.get(photoId);
     if (photo) {
       this.photos.delete(photoId);
+      this.database?.removePhoto(photoId);
       
       // Update source photo count
       const source = this.sources.get(photo.sourceId);
       if (source) {
         source.photoCount = (source.photoCount || 0) - 1;
+        this.database?.upsertSource(source);
       }
       
       this.emit('photoRemoved', photoId);

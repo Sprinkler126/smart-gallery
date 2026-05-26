@@ -13,8 +13,9 @@ import path from 'path';
 import crypto from 'crypto';
 
 export class AIAnalysisService {
-  constructor(config = {}) {
+  constructor(config = {}, databaseService = null) {
     const providers = this.normalizeProviders(config);
+    this.database = databaseService;
     this.config = {
       // API Configuration - User can customize these
       apiEndpoint: config.aiApiEndpoint || process.env.AI_API_ENDPOINT || '',
@@ -79,9 +80,9 @@ export class AIAnalysisService {
     // Ensure cache directory exists (now that we have the correct path)
     await fs.ensureDir(this.config.cacheDir);
     
-    console.log(`   Cache directory: ${this.config.cacheDir}`);
-    if (!this.cacheLoaded) {
-      await this.loadCache();
+      console.log(`   Cache directory: ${this.config.cacheDir}`);
+      if (!this.cacheLoaded) {
+        await this.loadCache();
       this.cacheLoaded = true;
       console.log(`   Cache loaded: ${this.cache.size} analyses`);
     } else {
@@ -225,6 +226,16 @@ export class AIAnalysisService {
    */
   async loadCache() {
     try {
+      if (this.database) {
+        const persistedAnalyses = this.database.getAnalyses();
+        for (const analysis of persistedAnalyses) {
+          this.cache.set(analysis.photoId, analysis);
+        }
+        if (persistedAnalyses.length > 0) {
+          console.log(`🧠 Loaded ${persistedAnalyses.length} AI analyses from SQLite`);
+        }
+      }
+
       const cachePath = path.join(this.config.cacheDir, 'analysis-cache.json');
       const absolutePath = path.resolve(cachePath);
       console.log(`   Looking for cache at: ${absolutePath}`);
@@ -243,6 +254,7 @@ export class AIAnalysisService {
             // Old MD5 key - migrate to photoId
             if (value.photoId) {
               this.cache.set(value.photoId, value);
+              this.database?.upsertAnalysis(value);
               migratedCount++;
             } else {
               // Skip entries without photoId (can't migrate)
@@ -251,6 +263,7 @@ export class AIAnalysisService {
           } else {
             // Already using photoId as key
             this.cache.set(key, value);
+            this.database?.upsertAnalysis(value);
           }
         }
         
@@ -274,6 +287,14 @@ export class AIAnalysisService {
    */
   async saveCache() {
     try {
+      if (this.database) {
+        const persistAll = this.database.db.transaction((analyses) => {
+          for (const analysis of analyses) {
+            this.database.upsertAnalysis(analysis);
+          }
+        });
+        persistAll(Array.from(this.cache.values()));
+      }
       const cachePath = path.join(this.config.cacheDir, 'analysis-cache.json');
       const data = Object.fromEntries(this.cache);
       await fs.writeJson(cachePath, data, { spaces: 2 });
@@ -324,6 +345,7 @@ export class AIAnalysisService {
 
       // Cache the result
       this.cache.set(cacheKey, analysis);
+      this.database?.upsertAnalysis(analysis);
       await this.saveCache();
 
       console.log(`✅ Analysis complete for ${photo.title}`);
@@ -648,6 +670,7 @@ export class AIAnalysisService {
     const id = crypto.randomUUID();
     const job = {
       id,
+      type: 'batch',
       status: 'queued',
       total: photos.length,
       completed: 0,
@@ -659,6 +682,7 @@ export class AIAnalysisService {
     };
 
     this.batchJobs.set(id, job);
+    this.database?.upsertAnalysisJob(job);
     this.processBatchJob(id, photos);
     return this.getBatchJob(id);
   }
@@ -669,6 +693,7 @@ export class AIAnalysisService {
 
     job.status = 'running';
     job.updatedAt = new Date().toISOString();
+    this.database?.upsertAnalysisJob(job);
 
     try {
       for (const photo of photos) {
@@ -684,6 +709,7 @@ export class AIAnalysisService {
             success: true,
             analyzedAt: analysis.analyzedAt
           });
+          this.database?.upsertAnalysisJob(job);
         } catch (error) {
           job.failed++;
           job.results.push({
@@ -692,9 +718,11 @@ export class AIAnalysisService {
             success: false,
             error: error.message
           });
+          this.database?.upsertAnalysisJob(job);
         }
 
         job.updatedAt = new Date().toISOString();
+        this.database?.upsertAnalysisJob(job);
 
         if (job.completed + job.failed < job.total) {
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -704,17 +732,19 @@ export class AIAnalysisService {
       job.status = 'completed';
       job.currentPhotoId = null;
       job.updatedAt = new Date().toISOString();
+      this.database?.upsertAnalysisJob(job);
     } catch (error) {
       job.status = 'failed';
       job.error = error.message;
       job.currentPhotoId = null;
       job.updatedAt = new Date().toISOString();
+      this.database?.upsertAnalysisJob(job);
     }
   }
 
   getBatchJob(jobId) {
     const job = this.batchJobs.get(jobId);
-    if (!job) return null;
+    if (!job) return this.database?.getAnalysisJob(jobId) || null;
     return {
       id: job.id,
       status: job.status,
@@ -730,10 +760,16 @@ export class AIAnalysisService {
   }
 
   getRecentBatchJobs(limit = 10) {
-    return Array.from(this.batchJobs.values())
+    const memoryJobs = Array.from(this.batchJobs.values())
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, limit)
       .map(job => this.getBatchJob(job.id));
+    if (memoryJobs.length >= limit || !this.database) return memoryJobs;
+
+    const seen = new Set(memoryJobs.map(job => job.id));
+    const persistedJobs = this.database.getRecentAnalysisJobs(limit)
+      .filter(job => !seen.has(job.id));
+    return [...memoryJobs, ...persistedJobs].slice(0, limit);
   }
 
   /**
@@ -851,6 +887,7 @@ export class AIAnalysisService {
    */
   async clearCache() {
     this.cache.clear();
+    this.database?.clearAnalysis();
     const cachePath = path.join(this.config.cacheDir, 'analysis-cache.json');
     if (await fs.pathExists(cachePath)) {
       await fs.remove(cachePath);

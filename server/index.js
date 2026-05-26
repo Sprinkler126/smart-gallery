@@ -16,6 +16,7 @@ import dotenv from 'dotenv';
 import { GalleryService } from './services/galleryService.js';
 import { AIAnalysisService } from './services/aiAnalysisService.js';
 import { VectorSearchService } from './services/vectorSearchService.js';
+import { DatabaseService } from './services/databaseService.js';
 import { createApiRouter } from './routes/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,11 +81,15 @@ const io = new SocketIOServer(httpServer, {
   path: '/photowall/socket.io'
 });
 
+// Initialize SQLite database
+const databaseService = new DatabaseService(config, __dirname);
+console.log(`🗄️  SQLite database: ${databaseService.dbPath}`);
+
 // Initialize Gallery Service
-const galleryService = new GalleryService(config);
+const galleryService = new GalleryService(config, databaseService);
 
 // Initialize AI Analysis Service
-const aiAnalysisService = new AIAnalysisService(config);
+const aiAnalysisService = new AIAnalysisService(config, databaseService);
 
 // Initialize Vector Search Service
 const vectorSearchService = new VectorSearchService(config);
