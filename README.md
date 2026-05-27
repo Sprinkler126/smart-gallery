@@ -8,10 +8,6 @@
 [![Express](https://img.shields.io/badge/Express-4-000000?logo=express)](https://expressjs.com)
 [![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite)](https://sqlite.org)
 
-在线访问：`https://sprinkler10.xyz/photowall/`
-
----
-
 ## 预览
 
 ### 首页
