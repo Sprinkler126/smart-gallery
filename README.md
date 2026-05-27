@@ -1,192 +1,259 @@
-# 📸 Smart Gallery
+# Smart Gallery
 
-> 一个美观、智能的照片展示应用，专为摄影爱好者打造。
+一个本地优先、带 AI 分析能力的个人照片墙。它会扫描本地/NAS/外接硬盘中的照片，自动生成缩略图、提取 EXIF、按文件夹分类，并提供瀑布流、时间线、Lightbox 和沉浸式幻灯片浏览体验。
 
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript)](https://www.typescriptlang.org)
-[![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite)](https://vitejs.dev)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss)](https://tailwindcss.com)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite)](https://vite.dev)
+[![Express](https://img.shields.io/badge/Express-4-000000?logo=express)](https://expressjs.com)
+[![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite)](https://sqlite.org)
 
-**在线演示**: https://sprinkler10.xyz
-
----
-
-## ✨ 功能特性
-
-### 🎨 照片展示
-- **多种视图**: 瀑布流、网格、时间线三种布局，自适应横竖屏
-- **幻灯片模式**: Ken Burns、翻页、淡入淡出三种切换效果，支持背景音乐同步
-- **粒子效果**: 15000 粒子梦幻光晕，60fps 流畅动画
-- **响应式设计**: 完美适配桌面、平板和手机
-
-### 🤖 AI 智能
-- **智能标签**: 多模态大模型自动分析照片内容
-- **语义搜索**: 用自然语言搜索照片（如"日落照片"、"雪山风景"）
-- **质量评分**: AI 评估技术质量和美学表现
-- **统计分析**: 热门标签、分类分布可视化
-
-### 🛡️ 内容保护
-- 禁用右键保存、拖拽、Ctrl+S 快捷键
-- 可选水印覆盖
-
-### 🔧 管理功能
-- **多源支持**: 本地文件夹、NAS、外部硬盘
-- **实时更新**: WebSocket 自动同步文件变动
-- **自动缩略图**: Sharp 高性能图片处理
-- **EXIF 元数据**: 提取相机信息、GPS、拍摄参数
+在线访问：`https://sprinkler10.xyz/photowall/`
 
 ---
 
-## 🚀 快速开始
+## 预览
+
+### 首页
+![Smart Gallery hero](docs/images/smart-gallery-hero.jpg)
+
+### 照片墙
+![Smart Gallery wall](docs/images/smart-gallery-wall.jpg)
+
+### 大图预览
+![Smart Gallery lightbox](docs/images/smart-gallery-lightbox.jpg)
+
+### 幻灯片
+![Smart Gallery slideshow](docs/images/smart-gallery-slideshow.jpg)
+
+### 移动端
+![Smart Gallery mobile](docs/images/smart-gallery-mobile.jpg)
+
+---
+
+## 功能特性
+
+### 浏览体验
+- 瀑布流、网格、时间线三种视图，适合横图、竖图和按时间回看。
+- 首页 Hero 自动轮播横图，空闲一段时间后可自动进入幻灯片。
+- Lightbox 支持上一张/下一张、滚轮缩放、拖拽、双击重置，移动端支持滑动切换和双指缩放。
+- 幻灯片支持淡入淡出、Ken Burns、翻页效果，支持背景音乐、顺序/随机播放、横竖图过滤。
+- 针对手机做了小屏导航、分类下拉、触控尺寸、安全区和横向溢出适配。
+
+### 图片与数据
+- 多照片源：本地目录、NAS 挂载目录、外接硬盘路径都可以作为来源。
+- 文件夹可自动映射为分类。
+- Sharp 生成缩略图，缓存可限制大小并自动清理。
+- 自动读取 EXIF：相机、镜头、光圈、快门、ISO、拍摄时间等。
+- SQLite 保存照片索引和 AI 分析结果，减少重复扫描和重复分析。
+
+### AI 能力
+- 多模态模型分析照片内容，生成描述、标签、分类、质量评价。
+- 支持模糊搜索和标签/语义搜索。
+- AI 分析结果会缓存到 SQLite 和本地缓存目录。
+- 可通过管理面板对单张照片或整个图库触发分析。
+
+### 管理与保护
+- 本地/内网访问时显示管理入口，支持刷新、重扫、添加/移除照片源、重建缓存。
+- 可用 `ADMIN_TOKEN` 保护远程管理写操作。
+- 禁用图片右键保存、拖拽和常见保存快捷键，降低误下载风险。
+- WebSocket 实时同步照片变化。
+
+---
+
+## 快速开始
 
 ### 环境要求
-- Node.js 18+
-- npm 或 yarn
+- Node.js 18+，推荐 Node.js 22+
+- npm
+- 可选：`cloudflared`，用于 Cloudflare Tunnel 外网访问
 
-### 安装运行
+### 安装
 
 ```bash
-# 克隆项目
-git clone https://github.com/yourusername/smart-gallery.git
+git clone https://github.com/Sprinkler126/smart-gallery.git
 cd smart-gallery
-
-# 安装依赖
 npm install
-
-# 配置照片源
-# 编辑 server/config.json，设置 imageSources.path
-
-# 启动服务
-npm start
-
-# 或开发模式（热重载）
-npm run dev
 ```
 
-访问 http://localhost:3001
+### 配置环境变量
 
----
+复制示例文件：
 
-## ⚙️ 配置
+```bash
+cp .env.example .env
+```
 
-编辑 `server/config.json`:
+常用变量：
+
+| 变量 | 说明 |
+| --- | --- |
+| `AI_API_ENDPOINT` | AI 服务的 OpenAI-compatible 接口地址 |
+| `AI_API_KEY` | AI 服务密钥，不要提交到 Git |
+| `AI_MODEL` | 使用的模型名称 |
+| `ADMIN_TOKEN` | 可选，远程管理写操作令牌 |
+| `PORT` | 可选，后端端口，默认 `3001` |
+| `HOST` | 可选，后端监听地址，默认 `0.0.0.0` |
+
+### 配置照片源
+
+编辑 `server/config.json`：
 
 ```json
 {
-  "appName": "My Gallery",
-  "photographerName": "Your Name",
+  "appName": "SPRINKLER",
+  "photographerName": "Sprinkler",
   "imageSources": [
     {
       "id": "photos",
-      "name": "我的照片",
+      "name": "My Photos",
       "type": "local",
       "path": "/path/to/photos",
       "enabled": true,
-      "useFolderAsCategory": true
+      "defaultCategory": "Gallery",
+      "useFolderAsCategory": true,
+      "watch": true
     }
   ],
   "enableAutoAnalysis": true
 }
 ```
 
-### 环境变量
-
-| 变量 | 说明 |
-|------|------|
-| `AI_API_ENDPOINT` | AI 服务地址 |
-| `AI_API_KEY` | AI 服务密钥 |
-| `AI_MODEL` | 模型名称（如 qwen-vl-plus） |
-
----
-
-## 🎮 快捷键
-
-| 按键 | 功能 |
-|------|------|
-| `Space` | 播放/暂停 |
-| `← / →` | 上一张/下一张 |
-| `T` | 切换效果 |
-| `R` | 随机/顺序播放 |
-| `M` | 静音 |
-| `F` | 全屏 |
-| `ESC` | 退出 |
-
----
-
-## 🛠️ 技术架构
-
-### 前端工程
-| 技术 | 选型理由 |
-|------|---------|
-| **React 19** | 最新并发特性，自动批处理优化渲染性能 |
-| **TypeScript 5** | 全链路类型安全，编译时错误捕获 |
-| **Vite 6** | 秒级冷启动，原生 ESM 构建，HMR 极速响应 |
-| **Tailwind CSS 4** | 原子化 CSS 引擎，零运行时开销，极致包体积优化 |
-
-### 后端服务
-| 技术 | 核心能力 |
-|------|---------|
-| **Node.js + Express** | 高性能异步 I/O，轻量级微服务架构 |
-| **Socket.IO** | 双向实时通信，自动降级兼容，房间级广播 |
-| **Sharp** | 基于 libvips 的 GPU 加速图像处理，比 ImageMagick 快 4-10x |
-| **Chokidar** | 原生 FSEvents 监听，毫秒级文件变动感知 |
-
-### AI 智能层
-| 技术 | 应用场景 |
-|------|---------|
-| **多模态大模型** | 视觉理解 + 自然语言，端到端图像语义分析 |
-| **Universal Sentence Encoder** | Google 开源向量编码，语义相似度计算 |
-| **TensorFlow.js** | 浏览器端本地推理，零延迟向量检索 |
-| **向量相似度搜索** | 余弦相似度 + 缓存优化，毫秒级语义匹配 |
-
-### 工程化
-| 技术 | 价值 |
-|------|------|
-| **WebGL 粒子系统** | 自定义 Shader，15000 粒子 60fps，GPU 加速渲染 |
-| **LRU 缓存策略** | 智能内存管理，图片 + 向量双级缓存 |
-| **Cloudflare Tunnel** | 零配置内网穿透，全球 CDN 边缘加速 |
-
----
-
-## 🚀 部署
-
-### Cloudflare Tunnel（推荐）
+### 开发模式
 
 ```bash
-cloudflared tunnel run your-tunnel
+npm run dev
 ```
 
-### 生产构建
+默认访问：
+
+- 前端：`http://localhost:3000/photowall/`
+- 后端 API：`http://localhost:3001/photowall/api`
+
+如果 `3000` 被占用，Vite 会自动使用下一个可用端口，终端会打印实际地址。
+
+### 生产模式
 
 ```bash
 npm run build
 npm start
 ```
 
+生产服务由 Express 同时提供 API 和构建后的前端页面，访问：
+
+```text
+http://localhost:3001/photowall/
+```
+
 ---
 
-## 📁 项目结构
+## 常用命令
 
-```
+| 命令 | 说明 |
+| --- | --- |
+| `npm run dev` | 同时启动后端和 Vite 前端开发服务 |
+| `npm run dev:server` | 只启动 Express API 服务 |
+| `npm run dev:client` | 只启动 Vite 前端 |
+| `npm run build` | 构建生产前端到 `dist/` |
+| `npm start` | 启动生产 Express 服务 |
+| `npm run generate` | 根据脚本生成图库数据 |
+
+---
+
+## 快捷键
+
+| 按键 | 功能 |
+| --- | --- |
+| `Space` | 幻灯片播放/暂停 |
+| `← / →` | 上一张/下一张 |
+| `T` | 切换幻灯片过渡效果 |
+| `R` | 切换随机/顺序播放 |
+| `M` | 静音/取消静音 |
+| `N` | 下一首背景音乐 |
+| `S` | 打开/关闭幻灯片设置 |
+| `ESC` | 退出 Lightbox 或幻灯片 |
+
+Lightbox 中还支持：
+
+| 操作 | 功能 |
+| --- | --- |
+| 鼠标滚轮 | 缩放 |
+| 拖拽 | 放大后平移 |
+| 双击 | 重置缩放 |
+| 移动端左右滑动 | 切换照片 |
+| 移动端双指缩放 | 缩放照片 |
+
+---
+
+## 技术架构
+
+### 前端
+- React 19 + TypeScript
+- Vite 6，部署路径固定为 `/photowall/`
+- Tailwind CDN 配置主题色和工具类
+- Socket.IO Client 接收图库刷新事件
+- 自定义 Lightbox、Slideshow、Timeline、AI Analysis Panel
+
+### 后端
+- Node.js + Express
+- Socket.IO 实时推送扫描和照片变更
+- better-sqlite3 保存照片目录、缓存和 AI 分析结果
+- Sharp 生成缩略图和显示图
+- Chokidar 监听照片目录变化
+- Exifr 读取照片元数据
+
+### AI 与搜索
+- OpenAI-compatible 多模态接口用于照片分析
+- Universal Sentence Encoder + TensorFlow.js 用于语义向量检索
+- 本地分析缓存避免重复调用模型
+
+---
+
+## 项目结构
+
+```text
 smart-gallery/
-├── server/           # Express 后端
-│   ├── services/     # AI分析、图片处理、语义搜索
-│   ├── routes/       # API 接口
-│   └── config.json   # 配置文件
-├── components/       # React 组件
-│   ├── Slideshow.tsx # 幻灯片系统
-│   ├── DreamParticles.tsx # 粒子效果
-│   └── AIAnalysisPanel.tsx # AI 面板
-├── hooks/            # 自定义 Hooks
-└── services/         # 前端服务
+├── App.tsx                       # 主界面、导航、图库视图
+├── components/
+│   ├── Lightbox.tsx              # 大图预览与缩放
+│   ├── Slideshow.tsx             # 幻灯片系统
+│   ├── TimelineView.tsx          # 时间线视图
+│   ├── AdminPanel.tsx            # 本地管理面板
+│   └── AIAnalysisPanel.tsx       # AI 分析与搜索面板
+├── hooks/
+│   └── useGallery.ts             # 前端图库状态和 API 接入
+├── services/                     # 前端 API、Socket、AI 服务封装
+├── server/
+│   ├── index.js                  # Express 入口
+│   ├── routes/api.js             # API 路由
+│   ├── services/                 # 图库、数据库、图片处理、AI、向量搜索
+│   └── config.json               # 本地图库配置
+├── docs/images/                  # README 截图
+├── public/photos/                # 可选静态照片目录
+└── vite.config.ts                # Vite 配置，base=/photowall/
 ```
 
 ---
 
-## 📝 License
+## 部署说明
 
-MIT © [yourusername](https://github.com/yourusername)
+### Cloudflare Tunnel
+
+如果已经配置好 tunnel：
+
+```bash
+cloudflared tunnel run photowall
+```
+
+项目里的 `start-photowall.sh` 可用于本机常驻启动，并包含 tunnel 进程的简单看护逻辑。
+
+### 注意事项
+- `.env` 已被 `.gitignore` 忽略，AI Key、GitHub Token 等敏感信息不要写进 README 或提交记录。
+- `server/config.json` 中的本地照片路径需要按部署机器实际路径调整。
+- 如果远程开放管理能力，建议设置 `ADMIN_TOKEN`。
 
 ---
 
-> 📸 用 ❤️ 为热爱摄影的人打造
+## License
+
+MIT © [Sprinkler126](https://github.com/Sprinkler126)
