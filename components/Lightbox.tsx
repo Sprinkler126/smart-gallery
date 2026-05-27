@@ -173,20 +173,31 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
   // Touch support for mobile
   const [touchStartDist, setTouchStartDist] = useState<number | null>(null);
   const [touchStartZoom, setTouchStartZoom] = useState(1);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+  const [isSwiping, setIsSwiping] = useState(false);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
+      // 双指开始 - 收缩/放大
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       );
       setTouchStartDist(dist);
       setTouchStartZoom(zoom);
+      setIsSwiping(false);
+    } else if (e.touches.length === 1 && zoom <= 1) {
+      // 单指开始 - 可能是左右滑动
+      setTouchStartX(e.touches[0].clientX);
+      setTouchStartY(e.touches[0].clientY);
+      setIsSwiping(false);
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 2 && touchStartDist !== null) {
+      // 双指缩放
       e.preventDefault();
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -194,16 +205,36 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
       );
       const scale = dist / touchStartDist;
       setZoom(prev => Math.max(1, Math.min(touchStartZoom * scale, 5)));
+    } else if (e.touches.length === 1 && touchStartX !== null && zoom <= 1) {
+      // 单指滑动检测
+      const deltaX = e.touches[0].clientX - touchStartX;
+      const deltaY = e.touches[0].clientY - touchStartY;
+      // 水平滑动距离 > 30px 且水平位移 > 垂直位移
+      if (Math.abs(deltaX) > 30 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+        setIsSwiping(true);
+      }
     }
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (isSwiping && touchStartX !== null) {
+      const endX = e.changedTouches[0].clientX;
+      const deltaX = endX - touchStartX;
+      if (deltaX > 80 && hasPrev) {
+        onPrev();
+      } else if (deltaX < -80 && hasNext) {
+        onNext();
+      }
+    }
     setTouchStartDist(null);
+    setTouchStartX(null);
+    setTouchStartY(null);
+    setIsSwiping(false);
   };
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-obsidian/95 backdrop-blur-md"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-obsidian/95 backdrop-blur-md safe-screen"
       onClick={onClose}
     >
       
@@ -245,16 +276,17 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
       {/* Controls */}
       <button 
         onClick={(e) => { e.stopPropagation(); onClose(); }}
-        className="absolute top-6 right-6 z-50 p-2 text-gray-400 hover:text-white transition-colors bg-black/20 hover:bg-black/50 rounded-full backdrop-blur-sm"
+        className="absolute top-4 right-4 md:top-6 md:right-6 z-50 p-3 md:p-2 text-gray-400 hover:text-white active:text-white transition-colors bg-black/30 hover:bg-black/50 rounded-full backdrop-blur-sm touch-manipulation"
+        aria-label="Close"
       >
-        <X size={24} />
+        <X size={28} className="md:w-6 md:h-6" />
       </button>
 
       {/* Delete Button */}
       {onDelete && (
         <button 
           onClick={(e) => { e.stopPropagation(); handleDeleteClick(); }}
-          className="absolute top-6 left-6 z-50 p-2 text-gray-400 hover:text-red-400 transition-colors bg-black/20 hover:bg-black/50 rounded-full backdrop-blur-sm"
+          className="absolute top-4 left-4 md:top-6 md:left-6 z-50 p-3 md:p-2 text-gray-400 hover:text-red-400 active:text-red-400 transition-colors bg-black/30 hover:bg-black/50 rounded-full backdrop-blur-sm touch-manipulation"
           title="Delete photo (Delete key)"
         >
           <Trash2 size={24} />
@@ -265,7 +297,7 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
       {onAIAnalysis && (
         <button 
           onClick={(e) => { e.stopPropagation(); onAIAnalysis(); }}
-          className="absolute top-6 left-20 z-50 p-2 text-gray-400 hover:text-gold transition-colors bg-black/20 hover:bg-black/50 rounded-full backdrop-blur-sm"
+          className="absolute top-4 left-16 md:top-6 md:left-20 z-50 p-3 md:p-2 text-gray-400 hover:text-gold active:text-gold transition-colors bg-black/30 hover:bg-black/50 rounded-full backdrop-blur-sm touch-manipulation"
           title="AI Analysis"
         >
           <Brain size={24} />
@@ -275,25 +307,27 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
       {hasPrev && (
         <button 
           onClick={(e) => { e.stopPropagation(); onPrev(); }}
-          className="absolute left-4 z-50 p-3 text-gray-400 hover:text-white transition-colors hover:scale-110"
+          className="absolute left-2 md:left-4 z-50 p-3 md:p-4 text-gray-400 hover:text-white active:text-white transition-colors hover:scale-110 touch-manipulation"
+          aria-label="Previous photo"
         >
-          <ChevronLeft size={40} strokeWidth={1} />
+          <ChevronLeft size={48} strokeWidth={1} className="md:w-10 md:h-10" />
         </button>
       )}
 
       {hasNext && (
         <button 
           onClick={(e) => { e.stopPropagation(); onNext(); }}
-          className="absolute right-4 z-50 p-3 text-gray-400 hover:text-white transition-colors hover:scale-110"
+          className="absolute right-2 md:right-4 z-50 p-3 md:p-4 text-gray-400 hover:text-white active:text-white transition-colors hover:scale-110 touch-manipulation"
+          aria-label="Next photo"
         >
-          <ChevronRight size={40} strokeWidth={1} />
+          <ChevronRight size={48} strokeWidth={1} className="md:w-10 md:h-10" />
         </button>
       )}
 
       {/* Main Image Container */}
       <div 
         ref={containerRef}
-        className="relative w-full h-full flex items-center justify-center p-4 lg:p-12 overflow-hidden cursor-grab"
+        className="relative w-full h-full flex items-center justify-center px-2 pt-16 pb-24 sm:p-4 lg:p-12 overflow-hidden cursor-grab"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -309,8 +343,8 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
             transformOrigin: 'center center',
-            width: '90vw',
-            height: '85vh',
+            width: 'min(90vw, 1400px)',
+            height: 'min(85vh, calc(100svh - 8rem))',
           }}
         >
           {/* Single thumbnail - always in the same position */}
@@ -319,7 +353,7 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
               src={photo.thumbnail}
               alt=""
               draggable={false}
-              className={`max-h-[85vh] max-w-[90vw] w-auto h-auto object-contain select-none transition-all duration-700 ${
+              className={`max-h-[calc(100svh-8rem)] md:max-h-[85vh] max-w-[calc(100vw-1rem)] md:max-w-[90vw] w-auto h-auto object-contain select-none transition-all duration-700 ${
                 imageLoaded ? 'opacity-0 blur-none' : 'opacity-100 blur-md'
               }`}
               style={{ WebkitUserSelect: 'none', pointerEvents: 'none' }}
@@ -334,9 +368,9 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
             onLoad={handleImageLoad}
             onError={handleImageError}
             draggable={false}
-            className={`max-h-[85vh] max-w-[90vw] w-auto h-auto object-contain shadow-2xl select-none transition-opacity duration-700 protected-image absolute ${
+            className={`max-h-[calc(100svh-8rem)] md:max-h-[85vh] max-w-[calc(100vw-1rem)] md:max-w-[90vw] w-auto h-auto object-contain shadow-2xl select-none transition-opacity duration-700 protected-image absolute ${
               imageLoaded && !imageError ? 'opacity-100' : 'opacity-0'
-            } ${zoom > 1 ? 'cursor-grbing' : 'cursor-grab'}`}
+            } ${zoom > 1 ? 'cursor-grabbing' : 'cursor-grab'}`}
             onContextMenu={(e) => e.preventDefault()}
             onDragStart={(e) => e.preventDefault()}
             style={{
@@ -383,7 +417,7 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
 
           {/* Error State */}
           {imageError && (
-            <div className="flex flex-col items-center justify-center w-[60vw] h-[60vh] bg-charcoal/50 rounded-lg text-gray-500">
+            <div className="flex flex-col items-center justify-center w-[85vw] md:w-[60vw] h-[50vh] md:h-[60vh] bg-charcoal/50 rounded-lg text-gray-500 px-6 text-center">
               <ImageOff size={48} className="mb-4 opacity-50" />
               <p>Failed to load image</p>
               <p className="text-sm mt-2 text-gray-600">{photo.title}</p>
@@ -393,33 +427,33 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
         
         {/* Zoom Controls */}
         {imageLoaded && !imageError && (
-          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full">
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-1.5 md:gap-2 bg-black/60 backdrop-blur-md px-2.5 md:px-4 py-2 md:py-2 rounded-full">
             <button
               onClick={(e) => { e.stopPropagation(); zoomOut(); }}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors disabled:opacity-30"
+              className="p-2.5 md:p-2 text-white/80 hover:text-white active:text-white hover:bg-white/10 rounded-full transition-colors disabled:opacity-30 touch-manipulation"
               disabled={zoom <= 1}
               title="Zoom Out (Scroll or -)"
             >
-              <ZoomOut size={20} />
+              <ZoomOut size={22} />
             </button>
             
-            <span className="text-white/80 text-sm font-medium min-w-[60px] text-center">
+            <span className="text-white/80 text-sm font-medium min-w-[50px] md:min-w-[60px] text-center">
               {Math.round(zoom * 100)}%
             </span>
             
             <button
               onClick={(e) => { e.stopPropagation(); zoomIn(); }}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors disabled:opacity-30"
+              className="p-2.5 md:p-2 text-white/80 hover:text-white active:text-white hover:bg-white/10 rounded-full transition-colors disabled:opacity-30 touch-manipulation"
               disabled={zoom >= 5}
               title="Zoom In (Scroll or +)"
             >
-              <ZoomIn size={20} />
+              <ZoomIn size={22} />
             </button>
             
             {zoom > 1 && (
               <button
                 onClick={(e) => { e.stopPropagation(); resetZoom(); }}
-                className="ml-2 px-3 py-1 text-xs text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                className="ml-1 md:ml-2 px-3 py-1.5 md:py-1 text-xs text-white/80 hover:text-white active:text-white hover:bg-white/10 rounded-full transition-colors touch-manipulation"
                 title="Reset Zoom (Double-click or 0)"
               >
                 Reset
@@ -430,23 +464,30 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
         
         {/* Metadata Overlay Toggle */}
         {imageLoaded && !imageError && (
-          <div className="absolute bottom-4 right-4 z-50 flex gap-3">
+          <div className="absolute bottom-20 right-4 md:bottom-4 z-50 flex gap-3">
              <button 
               onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium backdrop-blur-md transition-all ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 md:py-2 rounded-full text-sm font-medium backdrop-blur-md transition-all touch-manipulation ${
                 showInfo ? 'bg-gold text-obsidian' : 'bg-black/40 text-white hover:bg-black/60'
               }`}
             >
               {showInfo ? <X size={16}/> : <Info size={16} />}
-              <span>Details</span>
+              <span className="hidden sm:inline">Details</span>
             </button>
+          </div>
+        )}
+        
+        {/* Swipe Hint - 移动端显示 */}
+        {imageLoaded && !imageError && zoom === 1 && (
+          <div className="md:hidden absolute top-4 left-1/2 transform -translate-x-1/2 z-50 w-[calc(100%-7rem)] max-w-xs px-3 py-2 bg-black/40 backdrop-blur-md rounded-full text-white/60 text-xs text-center pointer-events-none">
+            左右滑动切换 · 双指缩放
           </div>
         )}
         
         {/* Zoom Hint - 桌面端显示 */}
         {imageLoaded && !imageError && zoom === 1 && (
           <div className="hidden md:block absolute top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full text-white/60 text-xs pointer-events-none">
-            🖱️ Scroll to zoom • Drag to pan • Double-click to reset
+            Scroll to zoom • Drag to pan • Double-click to reset
           </div>
         )}
       </div>
@@ -454,17 +495,17 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
       {/* Info Panel (Slide in from right) */}
       {showInfo && (
         <div 
-          className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-charcoal/95 backdrop-blur-xl border-l border-white/5 z-40 p-8 overflow-y-auto shadow-2xl"
+          className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-charcoal/95 backdrop-blur-xl border-l border-white/5 z-40 p-5 sm:p-8 pt-[calc(4rem+env(safe-area-inset-top))] overflow-y-auto shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="mt-12 space-y-8">
+          <div className="sm:mt-12 space-y-6 sm:space-y-8">
             
             {/* Header */}
             <div>
-              <h2 className="text-3xl font-serif text-white mb-2">{photo.title}</h2>
+              <h2 className="text-2xl sm:text-3xl font-serif text-white mb-2 break-words">{photo.title}</h2>
               <div className="flex items-center gap-2 text-gold text-sm uppercase tracking-widest font-medium">
-                <MapPin size={14} />
-                <span>{photo.location || 'Unknown Location'}</span>
+                <MapPin size={14} className="flex-shrink-0" />
+                <span className="truncate">{photo.location || 'Unknown Location'}</span>
               </div>
               <p className="text-gray-400 text-sm mt-1">{photo.date}</p>
               {photo.category && (
@@ -476,13 +517,13 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
 
             {/* EXIF Data */}
             {photo.exif && (photo.exif.camera || photo.exif.lens || photo.exif.aperture) && (
-              <div className="grid grid-cols-2 gap-4 py-6 border-y border-white/5">
+              <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-4 py-6 border-y border-white/5">
                  {photo.exif.camera && (
                    <div className="space-y-1">
                       <p className="text-xs text-gray-500 uppercase tracking-wide">Camera</p>
                       <div className="flex items-center gap-2 text-gray-200">
                         <Camera size={16} className="text-gold" />
-                        <span className="text-sm">{photo.exif.camera}</span>
+                        <span className="text-sm break-words">{photo.exif.camera}</span>
                       </div>
                    </div>
                  )}
@@ -498,7 +539,7 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
                  {photo.exif.lens && (
                    <div className="space-y-1">
                       <p className="text-xs text-gray-500 uppercase tracking-wide">Lens</p>
-                      <span className="text-sm text-gray-200">{photo.exif.lens}</span>
+                      <span className="text-sm text-gray-200 break-words">{photo.exif.lens}</span>
                    </div>
                  )}
                  {(photo.exif.shutter || photo.exif.iso) && (

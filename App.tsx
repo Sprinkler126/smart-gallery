@@ -119,6 +119,9 @@ const App: React.FC = () => {
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
   const [aiAnalysisPhoto, setAiAnalysisPhoto] = useState<Photo | undefined>(undefined);
   
+  // Mobile overlay state - for touch devices
+  const [mobileOverlayPhotoId, setMobileOverlayPhotoId] = useState<string | null>(null);
+  
   // Hero section state
   const [heroIndex, setHeroIndex] = useState(0);
   const [scrolled, setScrolled] = useState(false);
@@ -383,7 +386,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-obsidian text-white flex flex-col font-sans">
+    <div className="min-h-screen bg-obsidian text-white flex flex-col font-sans overflow-x-hidden">
       
       {/* Connection Status Indicator - 只在本地显示 */}
       {showAdminFeatures && (
@@ -400,7 +403,7 @@ const App: React.FC = () => {
       )}
 
       {/* 1. Full Screen Hero Section */}
-      <section className="relative h-screen w-full overflow-hidden flex items-center justify-center">
+      <section className="relative h-[100svh] min-h-[560px] md:h-screen w-full overflow-hidden flex items-center justify-center">
         
         {/* Dynamic Frosted Background */}
         <div className="absolute inset-0 z-0">
@@ -418,10 +421,10 @@ const App: React.FC = () => {
         </div>
 
         {/* Hero Content */}
-        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full px-4 text-center">
+        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full px-3 sm:px-4 py-16 sm:py-20 text-center">
            
            {/* Glass Card Container for Main Image */}
-           <div className="glass-card p-3 sm:p-4 rounded-xl shadow-2xl animate-fade-in transform hover:scale-[1.01] transition-transform duration-700 max-w-4xl w-full mb-8">
+           <div className="glass-card p-2.5 sm:p-4 rounded-xl shadow-2xl animate-fade-in transform hover:scale-[1.01] transition-transform duration-700 max-w-4xl w-full mb-5 sm:mb-8">
               <div className="relative aspect-[16/9] md:aspect-[21/9] w-full overflow-hidden rounded-lg bg-black/50">
                  {/* Carousel Images - 使用原图 */}
                  {heroPhotos.map((photo, index) => (
@@ -437,9 +440,9 @@ const App: React.FC = () => {
                  ))}
                  
                  {/* Overlay Text inside image - 只显示分类 */}
-                 <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black/80 to-transparent text-left">
+                 <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-8 bg-gradient-to-t from-black/80 to-transparent text-left">
                     {currentHeroPhoto && (
-                      <p className="text-gold text-sm uppercase tracking-widest animate-fade-in-slow">
+                      <p className="text-gold text-xs sm:text-sm uppercase tracking-widest animate-fade-in-slow">
                         {currentHeroPhoto.category}
                       </p>
                     )}
@@ -448,11 +451,11 @@ const App: React.FC = () => {
            </div>
 
            {/* Branding */}
-           <div className="animate-slide-up mb-8">
-             <h1 className="text-4xl md:text-7xl font-serif text-white tracking-tighter mb-2">
+           <div className="animate-slide-up mb-8 max-w-full">
+             <h1 className="text-4xl sm:text-5xl md:text-7xl font-serif text-white tracking-tight md:tracking-tighter mb-2 break-words">
                {appName}
              </h1>
-             <p className="text-sm md:text-base text-gray-300 tracking-[0.3em] font-light uppercase">
+             <p className="text-xs sm:text-sm md:text-base text-gray-300 tracking-[0.18em] sm:tracking-[0.3em] font-light uppercase leading-relaxed max-w-full">
                Photography by {photographerName}
              </p>
            </div>
@@ -470,8 +473,8 @@ const App: React.FC = () => {
            
            {/* 空闲倒计时提示 - 自动播放幻灯片 */}
            {homeIdleSeconds > 0 && !showSlideshow && (
-             <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-20">
-               <div className="bg-black/60 backdrop-blur-sm px-4 py-2 rounded-full text-white/70 text-sm flex items-center gap-2 animate-fade-in">
+             <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-20 w-[calc(100%-2rem)] max-w-sm">
+               <div className="bg-black/60 backdrop-blur-sm px-4 py-2 rounded-full text-white/70 text-xs sm:text-sm flex items-center justify-center gap-2 animate-fade-in">
                  <Play size={14} className="text-yellow-400" />
                  <span>
                    {homeIdleSeconds < 10 
@@ -488,22 +491,22 @@ const App: React.FC = () => {
       <header className={`sticky top-0 z-40 transition-all duration-300 border-b border-white/5 ${
         scrolled ? 'bg-obsidian/90 backdrop-blur-md py-2 shadow-lg' : 'bg-obsidian py-4'
       }`}>
-        <div className="max-w-7xl mx-auto px-3 md:px-6 flex items-center justify-between gap-2 overflow-hidden">
-          <div className={`flex flex-col transition-all duration-300 ${scrolled ? 'opacity-100' : 'opacity-0 lg:opacity-100'}`}>
+        <div className="max-w-7xl mx-auto px-3 md:px-6 flex items-center justify-between gap-2">
+          <div className={`hidden sm:flex flex-col min-w-0 transition-all duration-300 ${scrolled ? 'opacity-100' : 'opacity-0 lg:opacity-100'}`}>
              {scrolled && <span className="font-serif text-lg tracking-tight">{appName}</span>}
           </div>
 
-          <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
+          <div className="flex flex-1 sm:flex-none flex-wrap sm:flex-nowrap items-center justify-end gap-2 md:gap-4 min-w-0">
             {/* Search Box - 移动端简化 */}
-            <div className="flex items-center gap-1 md:gap-2 bg-white/5 rounded-lg px-2 md:px-3 py-1.5">
-              <Search size={16} className="text-gray-500" />
+            <div className="flex basis-full sm:basis-auto flex-1 sm:flex-none items-center gap-1 md:gap-2 bg-white/5 rounded-lg px-2 md:px-3 py-2 sm:py-1.5 min-w-0">
+              <Search size={16} className="text-gray-500 flex-shrink-0" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && performSearch()}
                 placeholder="搜索..."
-                className="bg-transparent border-none outline-none text-sm text-white placeholder-gray-500 w-20 md:w-48"
+                className="bg-transparent border-none outline-none text-[16px] sm:text-sm text-white placeholder-gray-500 w-16 sm:w-28 md:w-48 min-w-0"
               />
               {searchQuery && (
                 <button
@@ -528,31 +531,31 @@ const App: React.FC = () => {
               <button
                 onClick={performSearch}
                 disabled={isSearching || !searchQuery.trim()}
-                className="p-1.5 rounded bg-gold/20 text-gold hover:bg-gold/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-2.5 sm:p-1.5 rounded bg-gold/20 text-gold hover:bg-gold/30 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                {isSearching ? <Loader2 size={16} className="animate-spin sm:w-3.5 sm:h-3.5" /> : <Search size={16} className="sm:w-3.5 sm:h-3.5" />}
               </button>
             </div>
 
             {/* View Mode Toggle + Slideshow */}
-            <div className="flex gap-1 bg-white/5 p-1 rounded-lg">
+            <div className="flex flex-shrink-0 gap-1 bg-white/5 p-1 rounded-lg">
               <button 
                 onClick={() => setViewMode(ViewMode.GRID)}
-                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.GRID ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={`p-2.5 sm:p-2 rounded-md transition-all ${viewMode === ViewMode.GRID ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
                 title="Grid View"
               >
                 <Grid size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.MASONRY)}
-                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.MASONRY ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={`p-2.5 sm:p-2 rounded-md transition-all ${viewMode === ViewMode.MASONRY ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
                 title="Masonry View"
               >
                 <LayoutTemplate size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.TIMELINE)}
-                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.TIMELINE ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={`p-2.5 sm:p-2 rounded-md transition-all ${viewMode === ViewMode.TIMELINE ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
                 title="Timeline View"
               >
                 <Clock size={16} className="md:w-[18px] md:h-[18px]" />
@@ -560,7 +563,7 @@ const App: React.FC = () => {
               {/* Slideshow Button */}
               <button
                 onClick={() => openSlideshow(0)}
-                className="p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all border-l border-white/10 ml-1"
+                className="p-2.5 sm:p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all border-l border-white/10 ml-1"
                 title="Start Slideshow"
               >
                 <Play size={16} className="md:w-[18px] md:h-[18px]" />
@@ -620,7 +623,7 @@ const App: React.FC = () => {
 
         {/* Categories Navigation */}
         <div className="border-t border-white/5 bg-black/20">
-          <div className="max-w-7xl mx-auto px-6 py-3">
+          <div className="max-w-7xl mx-auto px-3 md:px-6 py-3">
             {/* 桌面端：横排按钮 */}
             <div className="hidden md:flex flex-wrap items-center gap-x-8 gap-y-2">
               {categories.map(cat => (
@@ -701,7 +704,7 @@ const App: React.FC = () => {
       )}
 
       {/* 3. Main Gallery Grid */}
-      <main id="gallery" className="flex-grow p-4 md:p-6 lg:p-12 max-w-7xl mx-auto w-full min-h-[50vh]">
+      <main id="gallery" className="flex-grow p-3 sm:p-4 md:p-6 lg:p-12 max-w-7xl mx-auto w-full min-h-[50vh]">
         {error && (
           <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
             {error}
@@ -746,13 +749,36 @@ const App: React.FC = () => {
                 onPhotoClick={(photo, index) => setSelectedPhotoIndex(filteredPhotos.indexOf(photo))}
               />
             ) : (
-              <div className={viewMode === ViewMode.MASONRY ? 'columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'}>
+              <div className={viewMode === ViewMode.MASONRY ? 'columns-1 sm:columns-2 lg:columns-3 gap-3 md:gap-6 space-y-3 md:space-y-6' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6'}>
                 {filteredPhotos.map((photo, index) => (
                   <div 
                     key={photo.id} 
-                    className={`break-inside-avoid relative group cursor-pointer rounded-sm overflow-hidden bg-charcoal shadow-lg transition-transform duration-500 hover:-translate-y-1 ${viewMode === ViewMode.MASONRY ? 'mb-6' : ''} ${
+                    className={`break-inside-avoid relative group cursor-pointer rounded-md sm:rounded-sm overflow-hidden bg-charcoal shadow-lg transition-transform duration-500 hover:-translate-y-1 ${viewMode === ViewMode.MASONRY ? 'mb-3 md:mb-6' : ''} ${
                       selectedPhotos.has(photo.id) ? 'ring-2 ring-gold ring-offset-2 ring-offset-obsidian' : ''
                     }`}
+                    onClick={(e) => {
+                      // 移动端：第一次点击显示overlay，第二次点击打开lightbox
+                      const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+                      if (isMobile && !isMultiSelectMode) {
+                        if (mobileOverlayPhotoId !== photo.id) {
+                          e.preventDefault();
+                          setMobileOverlayPhotoId(photo.id);
+                          return;
+                        }
+                        setMobileOverlayPhotoId(null);
+                      }
+                      if (isMultiSelectMode) {
+                        togglePhotoSelection(photo.id);
+                      } else {
+                        setSelectedPhotoIndex(index);
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      // 鼠标离开时清除移动端overlay
+                      if (mobileOverlayPhotoId === photo.id) {
+                        setMobileOverlayPhotoId(null);
+                      }
+                    }}
                   >
                     {/* Multi-select Checkbox */}
                     {isMultiSelectMode && (
@@ -787,20 +813,28 @@ const App: React.FC = () => {
                       }}
                     />
                     
-                    {/* Hover Overlay Info */}
+                    {/* Hover/Tap Overlay Info */}
                     <div 
-                      className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6 pointer-events-none backdrop-blur-[2px]"
+                      className={`absolute inset-0 bg-black/40 transition-opacity duration-300 flex flex-col justify-end p-4 md:p-6 pointer-events-none backdrop-blur-[2px] ${
+                        mobileOverlayPhotoId === photo.id 
+                          ? 'opacity-100' 
+                          : 'opacity-0 group-hover:opacity-100'
+                      }`}
                     >
-                      <div className="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
-                        <div className="flex justify-between items-end">
-                           <div>
+                      <div className={`transform transition-transform duration-300 ${
+                        mobileOverlayPhotoId === photo.id 
+                          ? 'translate-y-0' 
+                          : 'translate-y-4 group-hover:translate-y-0'
+                      }`}>
+                        <div className="flex justify-between items-end gap-3">
+                           <div className="min-w-0">
                             <span className="inline-block px-2 py-1 bg-gold/90 text-obsidian text-[10px] font-bold uppercase tracking-widest mb-2 rounded-sm">
                               {photo.category}
                             </span>
-                            <h3 className="text-xl font-serif text-white">{photo.title}</h3>
-                            <p className="text-xs text-gray-300 mt-1">{photo.location}</p>
+                            <h3 className="text-lg md:text-xl font-serif text-white truncate">{photo.title}</h3>
+                            <p className="text-xs text-gray-300 mt-1 truncate">{photo.location}</p>
                            </div>
-                           <div className="text-white/60 text-xs flex flex-col items-end">
+                           <div className="text-white/60 text-xs flex flex-col items-end flex-shrink-0">
                               <span>{photo.date.split('-')[0]}</span>
                               <span className="text-[10px] opacity-70">{photo.date.substring(5)}</span>
                            </div>
@@ -817,9 +851,9 @@ const App: React.FC = () => {
 
       {/* Multi-select Action Bar */}
       {isMultiSelectMode && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-charcoal/95 backdrop-blur-md border-t border-white/10 px-6 py-4">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-charcoal/95 backdrop-blur-md border-t border-white/10 px-4 sm:px-6 py-3 sm:py-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="flex items-center justify-between sm:justify-start gap-4">
               <span className="text-white font-medium">
                 {selectedPhotos.size} selected
               </span>
@@ -837,23 +871,24 @@ const App: React.FC = () => {
               </button>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-end gap-2 sm:gap-3">
               <button
                 onClick={() => {
                   setIsMultiSelectMode(false);
                   setSelectedPhotos(new Set());
                 }}
-                className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                className="px-3 sm:px-4 py-2 text-gray-400 hover:text-white transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleMultiDelete}
                 disabled={selectedPhotos.size === 0}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 disabled:cursor-not-allowed text-white rounded transition-colors flex items-center gap-2"
+                className="px-3 sm:px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 disabled:cursor-not-allowed text-white rounded transition-colors flex items-center gap-2 text-sm sm:text-base"
               >
                 <Trash2 size={18} />
-                Delete Selected
+                <span className="hidden sm:inline">Delete Selected</span>
+                <span className="sm:hidden">Delete</span>
               </button>
             </div>
           </div>
@@ -861,8 +896,8 @@ const App: React.FC = () => {
       )}
 
       {/* Footer */}
-      <footer className="border-t border-white/5 bg-charcoal py-16">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-12">
+      <footer className="border-t border-white/5 bg-charcoal py-12 md:py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-10 md:gap-12">
           
           <div className="text-center md:text-left space-y-4">
             <h2 className="text-2xl font-serif text-white">{appName}</h2>

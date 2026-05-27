@@ -39,25 +39,25 @@ const TimelineView: React.FC<TimelineViewProps> = ({ photos, onPhotoClick }) => 
   };
 
   return (
-    <div className="max-w-7xl mx-auto py-8">
+    <div className="max-w-7xl mx-auto py-4 md:py-8">
       {years.map(year => {
         // Sort Months Descending within the year
         const months = Object.keys(groupedPhotos[year]).map(Number).sort((a, b) => b - a);
 
         return (
-          <div key={year} className="mb-24 animate-fade-in">
+          <div key={year} className="mb-16 md:mb-24 animate-fade-in">
             {/* Sticky Year Header */}
-            <div className="sticky top-[72px] z-20 bg-obsidian/95 backdrop-blur-sm border-b border-white/5 py-4 mb-8 flex items-baseline gap-4">
-               <h2 className="text-5xl md:text-6xl font-serif text-white/20 font-bold tracking-tighter">
+            <div className="sticky top-[108px] md:top-[96px] z-20 bg-obsidian/95 backdrop-blur-sm border-b border-white/5 py-3 md:py-4 mb-6 md:mb-8 flex items-baseline gap-4">
+               <h2 className="text-4xl md:text-6xl font-serif text-white/20 font-bold tracking-tight md:tracking-tighter">
                 {year}
               </h2>
             </div>
 
             {months.map(month => (
-              <div key={month} className="mb-16">
+              <div key={month} className="mb-10 md:mb-16">
                 {/* Month Header */}
-                <div className="flex items-center gap-4 mb-6 pl-1">
-                  <h3 className="text-gold font-serif text-2xl tracking-wide">{getMonthName(month)}</h3>
+                <div className="flex items-center gap-3 md:gap-4 mb-4 md:mb-6 pl-1">
+                  <h3 className="text-gold font-serif text-xl md:text-2xl tracking-wide">{getMonthName(month)}</h3>
                   <div className="h-px bg-white/10 flex-grow max-w-[100px]" />
                   <span className="text-xs text-gray-500 font-mono">
                     {groupedPhotos[year][month].length} SHOTS
@@ -65,7 +65,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({ photos, onPhotoClick }) => 
                 </div>
 
                 {/* High Density Grid for this Month */}
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-1 md:gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5 md:gap-4">
                   {groupedPhotos[year][month].map((photo) => {
                     // Find global index for lightbox navigation
                     const globalIndex = photos.findIndex(p => p.id === photo.id);
@@ -87,7 +87,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({ photos, onPhotoClick }) => 
                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" />
                          
                          {/* Info Badge (Bottom Left) */}
-                         <div className="absolute bottom-0 left-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                         <div className="absolute bottom-0 left-0 right-0 p-2 md:p-3 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-t from-black/50 to-transparent">
                             <p className="text-white text-xs font-serif truncate w-32 drop-shadow-md">
                               {photo.title}
                             </p>

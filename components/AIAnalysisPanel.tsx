@@ -1225,10 +1225,10 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-charcoal border border-white/10 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4 safe-screen">
+      <div className="bg-charcoal border border-white/10 rounded-2xl w-full max-w-lg max-h-[88svh] sm:max-h-[80vh] overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/10">
           <div className="flex items-center gap-3">
             <Brain size={20} className="text-gold" />
             <h2 className="text-lg font-medium text-white">AI Analysis</h2>
@@ -1242,7 +1242,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         </div>
 
         {/* Tabs - Show Analysis + Settings when photo is selected, all tabs when no photo */}
-        <div className="flex border-b border-white/10">
+        <div className="flex border-b border-white/10 overflow-x-auto">
           {[
             { id: 'analysis', label: 'Analysis', icon: Sparkles },
             ...(photo ? [] : [{ id: 'search', label: 'Search', icon: Search }]),
@@ -1252,20 +1252,20 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm transition-colors ${
+              className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 text-sm transition-colors ${
                 activeTab === tab.id
                   ? 'text-gold border-b-2 border-gold'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
               <tab.icon size={14} />
-              {tab.label}
+              <span className="truncate">{tab.label}</span>
             </button>
           ))}
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[60vh]">
+        <div className="p-4 sm:p-6 overflow-y-auto max-h-[68svh] sm:max-h-[60vh]">
           {activeTab === 'analysis' && renderAnalysis()}
           {activeTab === 'settings' && renderSettings()}
           {!photo && activeTab === 'stats' && renderStats()}

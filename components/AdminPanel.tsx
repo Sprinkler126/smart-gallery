@@ -105,12 +105,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
   return (
     <div className="bg-charcoal border-b border-white/10">
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-serif text-white flex items-center gap-2">
+        <div className="flex items-center justify-between gap-3 mb-5 sm:mb-6">
+          <h2 className="text-lg sm:text-xl font-serif text-white flex items-center gap-2 min-w-0">
             <HardDrive size={20} className="text-gold" />
-            Image Sources Manager
+            <span className="truncate">Image Sources Manager</span>
           </h2>
           <button
             onClick={onClose}
@@ -132,20 +132,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
         {/* Stats Overview */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white/5 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gold">{stats.totalPhotos}</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
+            <div className="bg-white/5 rounded-lg p-3 sm:p-4">
+              <div className="text-xl sm:text-2xl font-bold text-gold">{stats.totalPhotos}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider">Total Photos</div>
             </div>
-            <div className="bg-white/5 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gold">{stats.totalSources}</div>
+            <div className="bg-white/5 rounded-lg p-3 sm:p-4">
+              <div className="text-xl sm:text-2xl font-bold text-gold">{stats.totalSources}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider">Sources</div>
             </div>
-            <div className="bg-white/5 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gold">{Object.keys(stats.categories).length}</div>
+            <div className="bg-white/5 rounded-lg p-3 sm:p-4">
+              <div className="text-xl sm:text-2xl font-bold text-gold">{Object.keys(stats.categories).length}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider">Categories</div>
             </div>
-            <div className="bg-white/5 rounded-lg p-4">
+            <div className="bg-white/5 rounded-lg p-3 sm:p-4">
               <div className="text-sm text-gray-400 truncate">
                 {stats.lastScanTime ? new Date(stats.lastScanTime).toLocaleString() : 'Never'}
               </div>
@@ -156,15 +156,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
         {/* Sources List */}
         <div className="space-y-3 mb-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
               Configured Sources
             </h3>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 sm:flex gap-2">
               <button
                 onClick={() => onRefresh()}
                 disabled={isRefreshing}
-                className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+                className="px-3 py-2 sm:py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 title="Reload photos from sources"
               >
                 <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
@@ -174,7 +174,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   onClick={() => onReset()}
                   disabled={isRefreshing}
-                  className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm flex items-center gap-2 transition-colors disabled:opacity-50 border border-red-500/30"
+                  className="px-3 py-2 sm:py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 border border-red-500/30"
                   title="Clear all cache and rebuild thumbnails"
                 >
                   <RefreshCw size={14} />
@@ -183,7 +183,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               )}
               <button
                 onClick={() => setShowAddForm(true)}
-                className="px-3 py-1.5 bg-gold text-obsidian rounded-lg text-sm flex items-center gap-2 hover:bg-gold/90 transition-colors"
+                className="col-span-2 sm:col-span-1 px-3 py-2 sm:py-1.5 bg-gold text-obsidian rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-gold/90 transition-colors"
               >
                 <Plus size={14} />
                 Add Source
@@ -202,15 +202,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               {sources.map((source) => (
                 <div
                   key={source.id}
-                  className="bg-white/5 rounded-lg p-4 flex items-center justify-between gap-4"
+                  className="bg-white/5 rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4"
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className={`p-2 rounded-lg ${source.enabled ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-500'}`}>
                       <FolderOpen size={18} />
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-white">{source.name}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-medium text-white truncate">{source.name}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                           source.status === 'ready' ? 'bg-green-500/20 text-green-400' :
                           source.status === 'scanning' ? 'bg-yellow-500/20 text-yellow-400' :
@@ -229,7 +229,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-end gap-2">
                     <button
                       onClick={() => handleScanSource(source.id)}
                       disabled={scanningSource === source.id}
@@ -255,7 +255,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Add Source Form */}
         {showAddForm && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-charcoal rounded-xl p-6 max-w-md w-full shadow-2xl border border-white/10">
+            <div className="bg-charcoal rounded-xl p-4 sm:p-6 max-w-md w-full max-h-[90svh] overflow-y-auto shadow-2xl border border-white/10">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-serif text-white">Add Image Source</h3>
                 <button
@@ -329,7 +329,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                   </label>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col sm:flex-row gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setShowAddForm(false)}
@@ -361,7 +361,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         )}
 
         {/* Usage Instructions */}
-        <div className="bg-white/5 rounded-lg p-4 text-sm text-gray-500">
+        <div className="bg-white/5 rounded-lg p-4 text-sm text-gray-500 overflow-hidden">
           <h4 className="text-xs uppercase tracking-wider text-gray-400 mb-2">Supported Paths</h4>
           <ul className="space-y-1 text-xs">
             <li>• <code className="text-gold">./public/photos</code> - Relative path from server</li>

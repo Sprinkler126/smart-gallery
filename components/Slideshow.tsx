@@ -950,7 +950,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-50 bg-black flex items-center justify-center overflow-hidden"
+      className="fixed inset-0 z-50 bg-black flex items-center justify-center overflow-hidden safe-screen"
       onClick={showControlsBriefly}
     >
       {/* Loading */}
@@ -979,7 +979,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       )}
 
       {/* ★ Main Image Area */}
-      <div className={`absolute inset-0 flex items-center justify-center p-8 transition-opacity duration-500 ${isLoading ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`absolute inset-0 flex items-center justify-center p-3 sm:p-5 md:p-8 transition-opacity duration-500 ${isLoading ? 'opacity-0' : 'opacity-100'}`}>
         {/* 3D Page Flip Container */}
         <div 
           className="relative w-full h-full"
@@ -1120,8 +1120,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           )}
 
         {currentPhoto && isPortrait && (
-          <div className="flex gap-4 h-full items-center transition-all duration-500 ease-out">
-            <div className="flex-1 h-full opacity-30">
+          <div className="flex gap-0 md:gap-4 h-full w-full items-center transition-all duration-500 ease-out">
+            <div className="hidden md:block flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (
                 <img
                   src={filteredPhotos[(safeIndex - 1 + filteredPhotos.length) % filteredPhotos.length].thumbnail}
@@ -1130,7 +1130,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 />
               )}
             </div>
-            <div className="flex-[2] h-full relative overflow-hidden">
+            <div className="flex-1 md:flex-[2] h-full relative overflow-hidden">
               {/* Ken Burns wrapper for portrait */}
               <div
                 className="w-full h-full"
@@ -1174,7 +1174,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 />
               </div>
             </div>
-            <div className="flex-1 h-full opacity-30">
+            <div className="hidden md:block flex-1 h-full opacity-30">
               {filteredPhotos.length > 1 && (
                 <img
                   src={filteredPhotos[(safeIndex + 1) % filteredPhotos.length].thumbnail}
@@ -1195,17 +1195,17 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
       {/* Top Bar */}
       <div className={`absolute top-0 left-0 right-0 z-20 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div className="flex items-center justify-between px-8 py-6">
-          <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-3 text-white/30 hover:text-white/70 rounded-full hover:bg-white/5 transition-colors" title="Exit (ESC)">
+        <div className="flex items-center justify-between px-3 sm:px-5 md:px-8 py-3 sm:py-5 md:py-6 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-5 md:pt-6">
+          <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2.5 md:p-3 text-white/30 hover:text-white/70 rounded-full hover:bg-white/5 transition-colors" title="Exit (ESC)">
             <X size={24} strokeWidth={1.5} />
           </button>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3">
             {/* BGM Mute Toggle with Hover Track Name */}
             {bgmLoaded && bgmList.length > 0 && (
               <div className="group relative flex items-center">
                 {/* Current Track Name - appears on hover */}
                 <div 
-                  className={`absolute right-full mr-2 flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0 cursor-pointer select-none ${isMuted ? 'bg-white/5' : 'bg-yellow-400/10'}`}
+                  className={`hidden sm:flex absolute right-full mr-2 items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0 cursor-pointer select-none ${isMuted ? 'bg-white/5' : 'bg-yellow-400/10'}`}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     setShowSongList((p) => !p);
@@ -1225,17 +1225,17 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
                 <button 
                   onClick={(e) => { e.stopPropagation(); setIsMuted((p) => !p); }} 
-                  className={`p-3 rounded-full transition-colors ${isMuted ? 'text-white/30 hover:text-white/70 hover:bg-white/5' : 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10'}`} 
+                  className={`p-2.5 md:p-3 rounded-full transition-colors ${isMuted ? 'text-white/30 hover:text-white/70 hover:bg-white/5' : 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10'}`} 
                   title={isMuted ? 'Unmute Music (M)' : 'Mute Music (M)'}
                 >
                   {isMuted ? <VolumeX size={20} strokeWidth={1.5} /> : <Volume2 size={20} strokeWidth={1.5} />}
                 </button>
               </div>
             )}
-            <button onClick={(e) => { e.stopPropagation(); setShowSettings((p) => !p); }} className={`p-3 rounded-full transition-colors ${showSettings ? 'bg-yellow-400 text-black' : 'text-white/30 hover:text-white/70 hover:bg-white/5'}`} title="Settings (S)">
+            <button onClick={(e) => { e.stopPropagation(); setShowSettings((p) => !p); }} className={`p-2.5 md:p-3 rounded-full transition-colors ${showSettings ? 'bg-yellow-400 text-black' : 'text-white/30 hover:text-white/70 hover:bg-white/5'}`} title="Settings (S)">
               <Settings size={20} strokeWidth={1.5} />
             </button>
-            <button onClick={(e) => { e.stopPropagation(); setIsPlaying((p) => !p); }} className="p-3 text-white/30 hover:text-white/70 hover:bg-white/5 rounded-full transition-colors" title={isPlaying ? 'Pause' : 'Play'}>
+            <button onClick={(e) => { e.stopPropagation(); setIsPlaying((p) => !p); }} className="p-2.5 md:p-3 text-white/30 hover:text-white/70 hover:bg-white/5 rounded-full transition-colors" title={isPlaying ? 'Pause' : 'Play'}>
               {isPlaying ? <Pause size={24} strokeWidth={1.5} /> : <Play size={24} strokeWidth={1.5} />}
             </button>
           </div>
@@ -1244,10 +1244,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
       {/* Settings Panel */}
       <div 
-        className={`absolute top-24 right-8 z-20 transition-all duration-300 ${showSettings && showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}
+        className={`absolute top-20 sm:top-24 left-3 right-3 sm:left-auto sm:right-8 z-20 transition-all duration-300 ${showSettings && showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl p-5 w-80 shadow-2xl max-h-[70vh] overflow-y-auto">
+        <div className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 sm:p-5 w-full sm:w-80 shadow-2xl max-h-[70svh] overflow-y-auto">
           <h3 className="text-white font-medium mb-4 text-lg">Settings</h3>
 
           {/* Duration */}
@@ -1411,32 +1411,32 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       </div>
 
       {/* Navigation Arrows */}
-      <button onClick={(e) => { e.stopPropagation(); navigate(-1); }} className={`absolute left-4 z-10 p-2 text-white/20 hover:text-white/60 transition-all ${showControls ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
+      <button onClick={(e) => { e.stopPropagation(); navigate(-1); }} className={`absolute left-1 sm:left-4 z-10 p-2 text-white/20 hover:text-white/60 transition-all ${showControls ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
         <ChevronLeft size={32} strokeWidth={1.5} />
       </button>
-      <button onClick={(e) => { e.stopPropagation(); navigate(1); }} className={`absolute right-4 z-10 p-2 text-white/20 hover:text-white/60 transition-all ${showControls ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
+      <button onClick={(e) => { e.stopPropagation(); navigate(1); }} className={`absolute right-1 sm:right-4 z-10 p-2 text-white/20 hover:text-white/60 transition-all ${showControls ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`}>
         <ChevronRight size={32} strokeWidth={1.5} />
       </button>
 
       {/* Bottom Info - 始终显示 */}
       <div className="absolute bottom-0 left-0 right-0 z-30">
-        <div className="bg-gradient-to-t from-black/70 via-black/30 to-transparent pt-20 md:pt-32 pb-6 md:pb-8 px-4 md:px-10">
-          <div className="flex items-end justify-between max-w-6xl mx-auto">
+        <div className="bg-gradient-to-t from-black/70 via-black/30 to-transparent pt-20 md:pt-32 pb-[calc(1.5rem+env(safe-area-inset-bottom))] md:pb-8 px-3 sm:px-4 md:px-10">
+          <div className="flex items-end justify-between gap-3 max-w-6xl mx-auto">
             {currentPhoto && (
               <div className="flex-1 min-w-0">
                 {/* 照片标题/意境描述 - 幻灯片时不显示 */}
                 {!isPlaying && (
-                  <h2 className="text-white text-lg md:text-2xl font-light tracking-wide mb-2 truncate">
+                  <h2 className="text-white text-base sm:text-lg md:text-2xl font-light tracking-wide mb-2 truncate">
                     {photoAnalysis?.depict || currentPhoto.title}
                   </h2>
                 )}
                 {/* 移动端：双排布局 */}
                 <div className="md:hidden flex flex-col gap-1.5 text-white/60 text-xs font-light">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                     {currentPhoto.category && (
                       <span className="flex items-center gap-1">
                         <span className="text-yellow-400/80">📁</span>
-                        <span className="truncate">{currentPhoto.category}</span>
+                        <span className="truncate max-w-[8rem]">{currentPhoto.category}</span>
                       </span>
                     )}
                     {currentPhoto.date && (
@@ -1472,7 +1472,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   {currentPhoto.date && (
                     <span className="flex items-center gap-1.5">
                       <span className="text-yellow-400/80">📅</span>
-                      {currentPhoto.date}
+                      <span className="truncate">{currentPhoto.date}</span>
                     </span>
                   )}
                   {/* EXIF 信息 */}
@@ -1499,7 +1499,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 )}
               </div>
             )}
-            <div className="text-white/40 text-xs md:text-sm font-light tabular-nums flex-shrink-0 ml-2">
+            <div className="text-white/40 text-xs md:text-sm font-light tabular-nums flex-shrink-0">
               {safeIndex + 1} / {filteredPhotos.length}
             </div>
           </div>
@@ -1518,11 +1518,11 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       {/* Song List Popup */}
       {showSongList && bgmList.length > 0 && (
         <div 
-          className="absolute top-24 right-8 z-30"
+          className="absolute top-20 sm:top-24 left-3 right-3 sm:left-auto sm:right-8 z-30"
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <div className="bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-4 w-72 shadow-2xl max-h-[50vh] flex flex-col">
+          <div className="bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-4 w-full sm:w-72 shadow-2xl max-h-[50svh] flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-white font-medium text-sm flex items-center gap-2">
                 <Music size={14} className="text-yellow-400" />
