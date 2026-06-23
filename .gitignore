@@ -29,6 +29,7 @@ server/data/
 
 # Environment variables (sensitive data)
 .env
+server/config.local.json
 
 # Test photos (keep directory structure)
 public/photos/*

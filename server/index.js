@@ -25,8 +25,22 @@ const __dirname = path.dirname(__filename);
 // Load environment variables from .env file (look in parent directory)
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
+const mergeConfig = (base, override) => ({
+  ...base,
+  ...override,
+  server: {
+    ...(base.server || {}),
+    ...(override.server || {})
+  },
+  thumbnails: {
+    ...(base.thumbnails || {}),
+    ...(override.thumbnails || {})
+  }
+});
+
 // Load configuration
 const configPath = path.join(__dirname, 'config.json');
+const localConfigPath = path.join(__dirname, 'config.local.json');
 let config;
 
 try {
@@ -48,6 +62,16 @@ try {
     autoRefreshInterval: 60000,
     enableFileWatcher: true
   };
+}
+
+if (await fs.pathExists(localConfigPath)) {
+  try {
+    const localConfig = await fs.readJson(localConfigPath);
+    config = mergeConfig(config, localConfig);
+    console.log('🔧 Loaded local config override: server/config.local.json');
+  } catch (error) {
+    console.error('Failed to load local config override:', error.message);
+  }
 }
 
 // Override sensitive config with environment variables

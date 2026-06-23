@@ -7,6 +7,7 @@ import { Router } from 'express';
 import path from 'path';
 import fs from 'fs-extra';
 import orientationService from '../services/orientationService.js';
+import { CreativeService } from '../services/creativeService.js';
 
 // Use native fetch (Node.js 18+)
 const fetch = globalThis.fetch || (await import('node-fetch')).default;
@@ -14,6 +15,12 @@ const fetch = globalThis.fetch || (await import('node-fetch')).default;
 export function createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config) {
   const router = Router();
   const adminToken = process.env.ADMIN_TOKEN || config.adminToken || '';
+  const creativeService = new CreativeService({
+    galleryService,
+    aiAnalysisService,
+    config,
+    baseDir: process.cwd()
+  });
 
   const getHostName = (value = '') => {
     const trimmed = value.trim();
@@ -774,6 +781,70 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         success: false,
         error: error.message
       });
+    }
+  });
+
+  // ==================== CREATIONS ====================
+
+  router.get('/creations/prompts', (req, res) => {
+    try {
+      res.json({
+        success: true,
+        data: creativeService.getPromptSuggestions()
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.get('/creations/templates', (req, res) => {
+    try {
+      res.json({
+        success: true,
+        data: creativeService.getTemplates()
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/creations/select', async (req, res) => {
+    try {
+      const result = await creativeService.selectPhotos(req.body || {});
+      res.json({ success: true, data: result });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/creations/collage', requireAdmin, async (req, res) => {
+    try {
+      const result = await creativeService.createCollage(req.body || {});
+      res.json({ success: true, data: result });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/creations/video-demo', requireAdmin, async (req, res) => {
+    try {
+      const result = await creativeService.createVideoDemo(req.body || {});
+      res.json({ success: true, data: result });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.get('/creations/file/:filename', async (req, res) => {
+    try {
+      const filePath = creativeService.getCreationFile(req.params.filename);
+      if (!await fs.pathExists(filePath)) {
+        return res.status(404).json({ success: false, error: 'Creation file not found' });
+      }
+      res.set('Cache-Control', 'public, max-age=86400');
+      res.sendFile(filePath);
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

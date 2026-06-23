@@ -6,9 +6,10 @@ import Lightbox from './components/Lightbox';
 import TimelineView from './components/TimelineView';
 import AdminPanel from './components/AdminPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
+import CreativePanel from './components/CreativePanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
-import { Grid, LayoutTemplate, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain } from 'lucide-react';
+import { Grid, LayoutTemplate, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles } from 'lucide-react';
 
 // 检测是否为本地访问（只有本地才能看到管理入口）
 const isLocalAccess = (): boolean => {
@@ -118,6 +119,7 @@ const App: React.FC = () => {
   // AI Analysis state
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
   const [aiAnalysisPhoto, setAiAnalysisPhoto] = useState<Photo | undefined>(undefined);
+  const [showCreativePanel, setShowCreativePanel] = useState(false);
   
   // Mobile overlay state - for touch devices
   const [mobileOverlayPhotoId, setMobileOverlayPhotoId] = useState<string | null>(null);
@@ -573,6 +575,14 @@ const App: React.FC = () => {
             {/* Refresh & Reset Buttons - 只在本地显示 */}
             {showAdminFeatures && (
               <div className="hidden md:flex items-center gap-2">
+                <button
+                  onClick={() => setShowCreativePanel(true)}
+                  className="p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all"
+                  title="Creative Tools"
+                >
+                  <Sparkles size={18} />
+                </button>
+
                 {/* AI Analysis Button */}
                 <button
                   onClick={() => {
@@ -954,6 +964,12 @@ const App: React.FC = () => {
         <AIAnalysisPanel
           photo={aiAnalysisPhoto}
           onClose={() => setShowAIAnalysis(false)}
+        />
+      )}
+
+      {showCreativePanel && (
+        <CreativePanel
+          onClose={() => setShowCreativePanel(false)}
         />
       )}
 

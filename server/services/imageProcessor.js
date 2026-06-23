@@ -22,7 +22,10 @@ export class ImageProcessor {
       maxCacheSize: 1000,
       autoClean: true
     };
-    this.cacheDir = this.thumbnailConfig.cacheDir;
+    this.cacheDir = path.isAbsolute(this.thumbnailConfig.cacheDir)
+      ? this.thumbnailConfig.cacheDir
+      : path.resolve(process.cwd(), this.thumbnailConfig.cacheDir);
+    this.thumbnailConfig.cacheDir = this.cacheDir;
     this.cacheIndex = new Map(); // Track cache usage
     fs.ensureDirSync(this.cacheDir);
     
