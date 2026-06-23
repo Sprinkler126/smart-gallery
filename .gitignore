@@ -34,3 +34,8 @@ server/config.local.json
 # Test photos (keep directory structure)
 public/photos/*
 !public/photos/.gitkeep
+
+# Local brand logos downloaded for EXIF frames
+public/brand-logos/*
+!public/brand-logos/.gitkeep
+!public/brand-logos/README.md

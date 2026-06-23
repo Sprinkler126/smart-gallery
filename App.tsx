@@ -7,6 +7,7 @@ import TimelineView from './components/TimelineView';
 import AdminPanel from './components/AdminPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
 import CreativePanel from './components/CreativePanel';
+import ExifFramePanel from './components/ExifFramePanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
 import { Grid, LayoutTemplate, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles } from 'lucide-react';
@@ -120,6 +121,7 @@ const App: React.FC = () => {
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
   const [aiAnalysisPhoto, setAiAnalysisPhoto] = useState<Photo | undefined>(undefined);
   const [showCreativePanel, setShowCreativePanel] = useState(false);
+  const [exifFramePhoto, setExifFramePhoto] = useState<Photo | undefined>(undefined);
   
   // Mobile overlay state - for touch devices
   const [mobileOverlayPhotoId, setMobileOverlayPhotoId] = useState<string | null>(null);
@@ -944,6 +946,9 @@ const App: React.FC = () => {
             setAiAnalysisPhoto(filteredPhotos[selectedPhotoIndex]);
             setShowAIAnalysis(true);
           }}
+          onExifFrame={showAdminFeatures ? () => {
+            setExifFramePhoto(filteredPhotos[selectedPhotoIndex]);
+          } : undefined}
         />
       )}
 
@@ -970,6 +975,13 @@ const App: React.FC = () => {
       {showCreativePanel && (
         <CreativePanel
           onClose={() => setShowCreativePanel(false)}
+        />
+      )}
+
+      {exifFramePhoto && (
+        <ExifFramePanel
+          photo={exifFramePhoto}
+          onClose={() => setExifFramePhoto(undefined)}
         />
       )}
 

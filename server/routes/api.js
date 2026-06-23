@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import orientationService from '../services/orientationService.js';
 import { CreativeService } from '../services/creativeService.js';
+import { ExifFrameService } from '../services/exifFrameService.js';
 
 // Use native fetch (Node.js 18+)
 const fetch = globalThis.fetch || (await import('node-fetch')).default;
@@ -18,6 +19,11 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
   const creativeService = new CreativeService({
     galleryService,
     aiAnalysisService,
+    config,
+    baseDir: process.cwd()
+  });
+  const exifFrameService = new ExifFrameService({
+    galleryService,
     config,
     baseDir: process.cwd()
   });
@@ -845,6 +851,57 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       res.sendFile(filePath);
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ==================== EXIF FRAME ====================
+
+  router.get('/exif-frame/templates', (req, res) => {
+    try {
+      res.json({
+        success: true,
+        data: exifFrameService.getTemplates()
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.get('/exif-frame/file/:filename', async (req, res) => {
+    try {
+      const filePath = exifFrameService.getFrameFile(req.params.filename);
+      if (!await fs.pathExists(filePath)) {
+        return res.status(404).json({ success: false, error: 'EXIF frame file not found' });
+      }
+      res.set('Cache-Control', 'public, max-age=86400');
+      res.sendFile(filePath);
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.get('/exif-frame/:id', (req, res) => {
+    try {
+      const result = exifFrameService.getPreview(req.params.id, req.query || {});
+      res.json({ success: true, data: result });
+    } catch (error) {
+      const status = error.message === 'Photo not found' ? 404 : 500;
+      res.status(status).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/exif-frame/:id', requireAdmin, async (req, res) => {
+    try {
+      const result = await exifFrameService.createFrame({
+        photoId: req.params.id,
+        templateId: req.body?.templateId,
+        overrides: req.body?.overrides || {},
+        width: req.body?.width
+      });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      const status = error.message === 'Photo not found' ? 404 : 500;
+      res.status(status).json({ success: false, error: error.message });
     }
   });
 

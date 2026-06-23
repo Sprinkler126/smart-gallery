@@ -11,9 +11,10 @@ interface LightboxProps {
   hasPrev: boolean;
   onDelete?: (photoId: string) => void;
   onAIAnalysis?: () => void;
+  onExifFrame?: () => void;
 }
 
-const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, hasNext, hasPrev, onDelete, onAIAnalysis }) => {
+const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, hasNext, hasPrev, onDelete, onAIAnalysis, onExifFrame }) => {
   const [showInfo, setShowInfo] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -301,6 +302,17 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
           title="AI Analysis"
         >
           <Brain size={24} />
+        </button>
+      )}
+
+      {/* EXIF Frame Button */}
+      {onExifFrame && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onExifFrame(); }}
+          className="absolute top-4 left-28 md:top-6 md:left-32 z-50 p-3 md:p-2 text-gray-400 hover:text-gold active:text-gold transition-colors bg-black/30 hover:bg-black/50 rounded-full backdrop-blur-sm touch-manipulation"
+          title="EXIF Frame"
+        >
+          <Camera size={24} />
         </button>
       )}
 
