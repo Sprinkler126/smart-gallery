@@ -59,6 +59,21 @@ const fetchOrientations = async (): Promise<Record<string, 'landscape' | 'portra
 const TRANSITION_MS = 1200;
 const PROGRESS_TICK = 100; // ms
 
+type ImageFetchPriority = 'high' | 'low' | 'auto';
+
+const configureImageLoad = (img: HTMLImageElement, priority: ImageFetchPriority) => {
+  img.decoding = 'async';
+  (img as HTMLImageElement & { fetchPriority?: ImageFetchPriority }).fetchPriority = priority;
+};
+
+const decodeLoadedImage = async (img: HTMLImageElement) => {
+  try {
+    await img.decode();
+  } catch {
+    // onload is still valid when decode() rejects for cached or partially decoded images.
+  }
+};
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -334,21 +349,59 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const PRELOAD_PREVIEW_AHEAD = 3; // 预览图预加载范围
   const MAX_FULL_PRELOAD = 5;      // 高清图最大预加载数量
   
+  const getPlaybackIndex = useCallback((centerIdx: number, offset: number, len = filteredPhotos.length) => {
+    if (len <= 0) return 0;
+
+    if (isRandomOrder && shuffledIndices.length === len) {
+      const playlistPosition = shuffledIndices.indexOf(centerIdx);
+      if (playlistPosition !== -1) {
+        return shuffledIndices[(playlistPosition + offset + len) % len];
+      }
+    }
+
+    return (centerIdx + offset + len) % len;
+  }, [filteredPhotos.length, isRandomOrder, shuffledIndices]);
+
   const qualityRef = useRef(imageQuality);
   useEffect(() => { qualityRef.current = imageQuality; }, [imageQuality]);
   
   // 跟踪正在加载的高清图数量
   const loadingFullCount = useRef(0);
+  const loadingFullUrls = useRef<Set<string>>(new Set());
   const fullPreloadQueue = useRef<string[]>([]);
 
   const preloadRange = useCallback((centerIdx: number, list: Photo[]) => {
     const len = list.length;
     if (len <= 1) return;
     const quality = qualityRef.current;
+    const collectPlaybackIndices = (ahead: number, behind: number) => {
+      const indices: number[] = [];
+      const seen = new Set<number>();
+      const maxOffset = Math.max(ahead, behind);
+
+      for (let offset = 1; offset <= maxOffset; offset++) {
+        if (offset <= ahead) {
+          const idx = getPlaybackIndex(centerIdx, offset, len);
+          if (!seen.has(idx)) {
+            seen.add(idx);
+            indices.push(idx);
+          }
+        }
+
+        if (offset <= behind) {
+          const idx = getPlaybackIndex(centerIdx, -offset, len);
+          if (!seen.has(idx)) {
+            seen.add(idx);
+            indices.push(idx);
+          }
+        }
+      }
+
+      return indices;
+    };
 
     // ========== L1: 缩略图预加载（前后 10 张）==========
-    for (let offset = 1; offset <= PRELOAD_THUMB_AHEAD; offset++) {
-      const idx = (centerIdx + offset) % len;
+    for (const idx of collectPlaybackIndices(PRELOAD_THUMB_AHEAD, 2)) {
       const photo = list[idx];
       if (!photo || !photo.thumbnail) continue;
       
@@ -357,14 +410,14 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       
       if (!thumbUrls.current.has(thumbKey)) {
         const tImg = new window.Image();
+        configureImageLoad(tImg, 'low');
         tImg.src = photo.thumbnail;
         tImg.onload = () => addToThumbCache(thumbKey, tImg);
       }
     }
 
     // ========== L2: 预览图预加载（前后 3 张）==========
-    for (let offset = 1; offset <= PRELOAD_PREVIEW_AHEAD; offset++) {
-      const idx = (centerIdx + offset) % len;
+    for (const idx of collectPlaybackIndices(PRELOAD_PREVIEW_AHEAD, 1)) {
       const photo = list[idx];
       if (!photo) continue;
       
@@ -375,6 +428,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       // 目前先用缩略图作为预览图
       if (!previewUrls.current.has(previewKey) && photo.thumbnail) {
         const pImg = new window.Image();
+        configureImageLoad(pImg, 'low');
         pImg.src = photo.thumbnail;
         pImg.onload = () => addToPreviewCache(previewKey, pImg);
       }
@@ -382,11 +436,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
     // ========== L3: 高清原图预加载（严格限制 5 张）==========
     // 计算需要预加载的高清图索引
-    const fullIndices: number[] = [];
-    for (let offset = 1; offset <= 2; offset++) { // 只预加载前后各 2 张
-      fullIndices.push((centerIdx + offset) % len);
-      fullIndices.push((centerIdx - offset + len) % len);
-    }
+    const fullIndices = collectPlaybackIndices(2, 2);
     
     // 限制高清图缓存大小
     while (fullCache.current.size >= MAX_FULL_PRELOAD) {
@@ -408,22 +458,27 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
       const fullKey = `full:${photoUrl}`;
       
-      if (!fullUrls.current.has(fullKey)) {
+      if (!fullUrls.current.has(fullKey) && !loadingFullUrls.current.has(fullKey)) {
         loadingFullCount.current++;
+        loadingFullUrls.current.add(fullKey);
         const fImg = new window.Image();
+        configureImageLoad(fImg, 'low');
         fImg.src = photoUrl;
-        fImg.onload = () => {
+        fImg.onload = async () => {
+          await decodeLoadedImage(fImg);
           addToFullCache(fullKey, fImg);
           loadingFullCount.current--;
+          loadingFullUrls.current.delete(fullKey);
         };
         fImg.onerror = () => {
           loadingFullCount.current--;
+          loadingFullUrls.current.delete(fullKey);
         };
       }
     }
     
     console.log(`📦 Preload: thumb=${thumbCache.current.size}, preview=${previewCache.current.size}, full=${fullCache.current.size} (loading: ${loadingFullCount.current})`);
-  }, [addToThumbCache, addToPreviewCache, addToFullCache]);
+  }, [addToThumbCache, addToPreviewCache, addToFullCache, getPlaybackIndex]);
 
   useEffect(() => { playStateRef.current.isPlaying = isPlaying; }, [isPlaying]);
   useEffect(() => { playStateRef.current.intervalSec = intervalSec; }, [intervalSec]);
@@ -665,6 +720,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     // 加载缩略图（独立，不阻塞）- 使用 L1 缓存
     if (currentPhoto.thumbnail && !thumbUrls.current.has(thumbKey)) {
       const tImg = new window.Image();
+      configureImageLoad(tImg, 'low');
       tImg.src = currentPhoto.thumbnail;
       tImg.onload = () => {
         if (cancelled) return;
@@ -695,8 +751,11 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     // 加载原图（独立，不阻塞）- 使用 L3 缓存
     if (!fullUrls.current.has(fullKey)) {
       const fImg = new window.Image();
+      configureImageLoad(fImg, 'high');
       fImg.src = effectiveUrl;
-      fImg.onload = () => {
+      fImg.onload = async () => {
+        if (cancelled) return;
+        await decodeLoadedImage(fImg);
         if (cancelled) return;
         addToFullCache(fullKey, fImg);
         // ★ 原图加载完成，但等待最小显示时间
@@ -747,14 +806,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return;
     }
 
-    // 计算下一张的索引
-    let nextIdx: number;
-    if (isRandomOrder && shuffledIndices.length > 0) {
-      const currentShuffledIdx = shuffledIndices.indexOf(safeIndex);
-      nextIdx = shuffledIndices[(currentShuffledIdx + 1) % len];
-    } else {
-      nextIdx = (safeIndex + 1) % len;
-    }
+    const nextIdx = getPlaybackIndex(safeIndex, 1, len);
 
     const nextPhoto = filteredPhotos[nextIdx];
     if (!nextPhoto) {
@@ -780,19 +832,44 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return;
     }
 
+    if (loadingFullUrls.current.has(fullKey)) {
+      setNextImageReady(false);
+      const waitForExistingLoad = window.setInterval(() => {
+        if (fullUrls.current.has(fullKey)) {
+          window.clearInterval(waitForExistingLoad);
+          setNextImageReady(true);
+          setIsPlaying(true);
+          return;
+        }
+
+        if (!loadingFullUrls.current.has(fullKey)) {
+          window.clearInterval(waitForExistingLoad);
+          setNextImageReady(true);
+          setIsPlaying(true);
+        }
+      }, 120);
+
+      return () => window.clearInterval(waitForExistingLoad);
+    }
+
     // 重置状态，开始加载
     setNextImageReady(false);
 
     // 预加载下一张高清图
     const fImg = new window.Image();
+    configureImageLoad(fImg, 'high');
+    loadingFullUrls.current.add(fullKey);
     fImg.src = nextUrl;
-    fImg.onload = () => {
+    fImg.onload = async () => {
+      await decodeLoadedImage(fImg);
       addToFullCache(fullKey, fImg);
+      loadingFullUrls.current.delete(fullKey);
       setNextImageReady(true);
       // 加载完成，恢复播放
       setIsPlaying(true);
     };
     fImg.onerror = () => {
+      loadingFullUrls.current.delete(fullKey);
       // 加载失败也标记为准备好，避免卡住
       setNextImageReady(true);
       setIsPlaying(true);
@@ -801,7 +878,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     return () => {
       // 清理，但让图片继续加载（不 abort）
     };
-  }, [safeIndex, filteredPhotos, transition, isRandomOrder, shuffledIndices, imageQuality, isPlaying, addToFullCache]);
+  }, [safeIndex, filteredPhotos, transition, imageQuality, isPlaying, addToFullCache, getPlaybackIndex]);
 
   /* ================================================================ */
   /*  加载 orientations                                                */
@@ -923,6 +1000,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     fullUrls.current.clear();
     preloadedUrls.current.clear();
     imageCache.current.clear();
+    loadingFullUrls.current.clear();
     kenBurnsCache.current.clear();
     
     // ★ 清理预加载队列
@@ -937,6 +1015,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   /* ================================================================ */
   const currentOrientation = currentPhoto ? (photoOrientations[currentPhoto.id] ?? 'landscape') : 'landscape';
   const isPortrait = currentOrientation === 'portrait';
+  const previousPlaybackPhoto = filteredPhotos.length > 1
+    ? filteredPhotos[getPlaybackIndex(safeIndex, -1)]
+    : undefined;
+  const nextPlaybackPhoto = filteredPhotos.length > 1
+    ? filteredPhotos[getPlaybackIndex(safeIndex, 1)]
+    : undefined;
 
   const changeInterval = useCallback((sec: IntervalOption) => {
     setIntervalSec(sec);
@@ -1122,11 +1206,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         {currentPhoto && isPortrait && (
           <div className="flex gap-0 md:gap-4 h-full w-full items-center transition-all duration-500 ease-out">
             <div className="hidden md:block flex-1 h-full opacity-30">
-              {filteredPhotos.length > 1 && (
+              {previousPlaybackPhoto && (
                 <img
-                  src={filteredPhotos[(safeIndex - 1 + filteredPhotos.length) % filteredPhotos.length].thumbnail}
+                  src={previousPlaybackPhoto.thumbnail}
                   alt=""
                   className="w-full h-full object-contain"
+                  decoding="async"
                 />
               )}
             </div>
@@ -1175,11 +1260,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               </div>
             </div>
             <div className="hidden md:block flex-1 h-full opacity-30">
-              {filteredPhotos.length > 1 && (
+              {nextPlaybackPhoto && (
                 <img
-                  src={filteredPhotos[(safeIndex + 1) % filteredPhotos.length].thumbnail}
+                  src={nextPlaybackPhoto.thumbnail}
                   alt=""
                   className="w-full h-full object-contain"
+                  decoding="async"
                 />
               )}
             </div>

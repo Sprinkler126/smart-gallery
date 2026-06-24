@@ -1,22 +1,13 @@
-/**
- * DreamParticles v5 - 粒子只在照片区域内，凝聚成高清图
- * 
- * 核心效果：
- * - 粒子只在照片实际显示区域内生成
- * - 粒子带有照片对应位置的颜色
- * - 形成"从粒子逐渐凝聚成高清照片"的视觉效果
- * - 照片区域外保持干净（无粒子）
- */
-import React, { useEffect, useRef, useCallback, memo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef } from 'react';
 
-interface SandParticle {
+interface PhotoParticle {
   x: number;
   y: number;
   originX: number;
   originY: number;
   color: string;
   size: number;
-  windSeed: number;       // 随机种子，决定摆动节奏
+  seed: number;
   alpha: number;
   life: number;
   maxLife: number;
@@ -25,43 +16,51 @@ interface SandParticle {
   scatterSpeed: number;
 }
 
+interface AtmosphereOrb {
+  x: number;
+  y: number;
+  radius: number;
+  alpha: number;
+  seed: number;
+  speed: number;
+  sprite: HTMLCanvasElement;
+}
+
 interface DreamParticlesProps {
   thumbnailUrl: string;
   visible: boolean;
-  particleCount?: number; // 粒子数量等级：1-10，默认5
-  /**
-   * 当为 true 时，组件完全卸载并清理所有资源
-   * 用于幻灯片退出时彻底释放内存
-   */
+  particleCount?: number;
   shouldDestroy?: boolean;
 }
 
-// 基础配置（粒子数量可调节）
 const BASE_CONFIG = {
-  STEP: 3,                // 采样步长：3px
-  FPS: 60,                // 目标帧率：60fps
-  FORMING_MS: 1200,       // 形成时间
-  SWAY_MIN_MS: 2000,      // 最小摆动时间
-  SWAY_MAX_MS: 5000,      // 最大摆动时间
-  WIND_SPEED: 0.0008,     // 风场速度
-  WIND_STRENGTH: 3.0,     // 风场强度
+  FORMING_MS: 1100,
+  SWAY_MIN_MS: 2400,
+  SWAY_MAX_MS: 5600,
+  WIND_STRENGTH: 3.2,
+  ORB_COUNT: 90,
 };
 
-// 粒子数量配置映射（1-10级）
 const PARTICLE_LEVELS = [
-  { step: 8, max: 2000 },    // 1 - 极少
-  { step: 6, max: 4000 },    // 2 - 很少
-  { step: 5, max: 6000 },    // 3 - 少
-  { step: 4, max: 8000 },    // 4 - 较少
-  { step: 3, max: 12000 },   // 5 - 中等（默认）
-  { step: 3, max: 15000 },   // 6 - 较多
-  { step: 2, max: 20000 },   // 7 - 多
-  { step: 2, max: 30000 },   // 8 - 很多
-  { step: 2, max: 45000 },   // 9 - 极多
-  { step: 1, max: 60000 },   // 10 - 密集
+  { step: 10, max: 1000, fps: 36 },
+  { step: 8, max: 1800, fps: 40 },
+  { step: 7, max: 2800, fps: 45 },
+  { step: 6, max: 4200, fps: 45 },
+  { step: 5, max: 6000, fps: 45 },
+  { step: 4, max: 8000, fps: 45 },
+  { step: 4, max: 10500, fps: 40 },
+  { step: 3, max: 13000, fps: 36 },
+  { step: 3, max: 16000, fps: 32 },
+  { step: 2, max: 20000, fps: 30 },
 ];
 
-// 获取配置
+const ORB_PALETTE = [
+  'rgba(248,215,139,',
+  'rgba(139,221,214,',
+  'rgba(223,156,210,',
+  'rgba(168,190,255,',
+];
+
 function getConfig(particleLevel: number = 5) {
   const level = Math.max(1, Math.min(10, particleLevel));
   const settings = PARTICLE_LEVELS[level - 1];
@@ -69,36 +68,11 @@ function getConfig(particleLevel: number = 5) {
     ...BASE_CONFIG,
     STEP: settings.step,
     MAX_PARTICLES: settings.max,
+    FPS: settings.fps,
+    ORB_COUNT: Math.round(BASE_CONFIG.ORB_COUNT * (0.55 + level * 0.08)),
   };
 }
 
-/**
- * 简化的风场偏移 - 使用伪随机代替复杂噪声，提升性能
- */
-function windDisplacement(
-  originX: number,
-  originY: number,
-  time: number,
-  seed: number,
-  config: typeof BASE_CONFIG
-): { dx: number; dy: number } {
-  const t = time * config.WIND_SPEED;
-  
-  // 伪随机摆动：基于时间和种子生成平滑变化
-  const angle = (originX * 0.01 + originY * 0.007 + t * 0.5 + seed * 6.28) % (Math.PI * 2);
-  const noise = Math.sin(angle) * Math.cos(t * 0.3 + seed * 3.14);
-  
-  // 简化的风场运动
-  const dx = (Math.sin(t * 0.4 + seed * 2) * 0.6 + noise * 0.4) * config.WIND_STRENGTH;
-  const dy = (Math.cos(t * 0.25 + seed * 1.5) * 0.4 + noise * 0.3 - 0.2) * config.WIND_STRENGTH * 0.6;
-
-  return { dx, dy };
-}
-
-/**
- * 计算 object-contain 的实际绘制区域
- * 模拟 CSS object-fit: contain 的行为
- */
 function calcContainRect(
   containerW: number,
   containerH: number,
@@ -108,30 +82,84 @@ function calcContainRect(
   const containerAspect = containerW / containerH;
   const contentAspect = contentW / contentH;
 
-  let drawW: number, drawH: number, offsetX: number, offsetY: number;
-
   if (contentAspect > containerAspect) {
-    // 内容更宽 → 以容器宽度为准
-    drawW = containerW;
-    drawH = containerW / contentAspect;
-    offsetX = 0;
-    offsetY = (containerH - drawH) / 2;
-  } else {
-    // 内容更高 → 以容器高度为准
-    drawH = containerH;
-    drawW = containerH * contentAspect;
-    offsetX = (containerW - drawW) / 2;
-    offsetY = 0;
+    const w = containerW;
+    const h = containerW / contentAspect;
+    return { x: 0, y: (containerH - h) / 2, w, h };
   }
 
-  return { x: offsetX, y: offsetY, w: drawW, h: drawH };
+  const h = containerH;
+  const w = containerH * contentAspect;
+  return { x: (containerW - w) / 2, y: 0, w, h };
 }
 
-// 全局粒子系统管理器 - 用于跟踪所有粒子实例
+function quantizeColor(r: number, g: number, b: number) {
+  const qr = Math.round(r / 16) * 16;
+  const qg = Math.round(g / 16) * 16;
+  const qb = Math.round(b / 16) * 16;
+  return `rgb(${qr},${qg},${qb})`;
+}
+
+function createGlowSprite(colorPrefix: string, size: number) {
+  const sprite = document.createElement('canvas');
+  sprite.width = size;
+  sprite.height = size;
+  const ctx = sprite.getContext('2d');
+  if (!ctx) return sprite;
+
+  const center = size / 2;
+  const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+  gradient.addColorStop(0, `${colorPrefix}0.36)`);
+  gradient.addColorStop(0.26, `${colorPrefix}0.16)`);
+  gradient.addColorStop(0.72, `${colorPrefix}0.045)`);
+  gradient.addColorStop(1, `${colorPrefix}0)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  return sprite;
+}
+
+function buildAtmosphereOrbs(
+  rect: { x: number; y: number; w: number; h: number },
+  dpr: number,
+  count: number
+) {
+  const spriteSize = Math.round(120 * dpr);
+  const sprites = ORB_PALETTE.map((color) => createGlowSprite(color, spriteSize));
+  const orbs: AtmosphereOrb[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const seed = Math.random();
+    const sprite = sprites[i % sprites.length];
+    orbs.push({
+      x: (rect.x + rect.w * (0.08 + Math.random() * 0.84)) * dpr,
+      y: (rect.y + rect.h * (0.08 + Math.random() * 0.84)) * dpr,
+      radius: (34 + Math.random() * 90) * dpr,
+      alpha: 0.18 + Math.random() * 0.24,
+      seed,
+      speed: 0.00016 + Math.random() * 0.00028,
+      sprite,
+    });
+  }
+
+  return orbs;
+}
+
+function reservoirPush<T>(items: T[], item: T, seen: number, max: number) {
+  if (items.length < max) {
+    items.push(item);
+    return;
+  }
+
+  const replaceIndex = Math.floor(Math.random() * seen);
+  if (replaceIndex < max) {
+    items[replaceIndex] = item;
+  }
+}
+
 class ParticleSystemManager {
   private static instance: ParticleSystemManager;
   private activeSystems: Set<string> = new Set();
-  private totalParticles: number = 0;
+  private totalParticles = 0;
 
   static getInstance(): ParticleSystemManager {
     if (!ParticleSystemManager.instance) {
@@ -162,327 +190,304 @@ const particleManager = ParticleSystemManager.getInstance();
 
 function DreamParticles({ thumbnailUrl, visible, particleCount = 5, shouldDestroy = false }: DreamParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const particlesRef = useRef<SandParticle[]>([]);
+  const particlesRef = useRef<PhotoParticle[]>([]);
+  const particleGroupsRef = useRef<Map<string, PhotoParticle[]>>(new Map());
+  const orbsRef = useRef<AtmosphereOrb[]>([]);
   const animRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
   const isReadyRef = useRef(false);
-  const startTimeRef = useRef<number>(0);
-  // 保存绘制区域信息（用于动画中的坐标偏移）
+  const startTimeRef = useRef(0);
   const drawRectRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
-  // 缓存配置
+  const dprRef = useRef(1);
   const configRef = useRef(getConfig(particleCount));
-  // 系统唯一ID
-  const systemIdRef = useRef(`particle-system-${Math.random().toString(36).substr(2, 9)}`);
-  // 是否已注册到管理器
+  const systemIdRef = useRef(`particle-system-${Math.random().toString(36).slice(2, 11)}`);
   const isRegisteredRef = useRef(false);
 
-  // 粒子数量变化时更新配置
   useEffect(() => {
     configRef.current = getConfig(particleCount);
   }, [particleCount]);
 
-  /** 动画循环 */
+  const cleanup = useCallback(() => {
+    if (animRef.current) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = 0;
+    }
+
+    const particleTotal = particlesRef.current.length;
+    particlesRef.current = [];
+    particleGroupsRef.current.clear();
+    orbsRef.current = [];
+    isReadyRef.current = false;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (canvas && ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    if (isRegisteredRef.current) {
+      particleManager.unregister(systemIdRef.current, particleTotal);
+      isRegisteredRef.current = false;
+    }
+  }, []);
+
   const animate = useCallback((time: number) => {
-    const CONFIG = configRef.current;
-    if (time - lastFrameRef.current < 1000 / CONFIG.FPS) {
+    const config = configRef.current;
+    if (time - lastFrameRef.current < 1000 / config.FPS) {
       animRef.current = requestAnimationFrame(animate);
       return;
     }
-    const dt = time - lastFrameRef.current;
+
+    const dt = Math.min(50, time - lastFrameRef.current);
     lastFrameRef.current = time;
 
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const particles = particlesRef.current;
-    if (particles.length === 0 || !isReadyRef.current) {
+    if (!isReadyRef.current || particlesRef.current.length === 0) {
       animRef.current = requestAnimationFrame(animate);
       return;
     }
 
     const elapsed = time - startTimeRef.current;
-    const colorGroups = new Map<string, SandParticle[]>();
+    const rect = drawRectRef.current;
+    const dpr = dprRef.current;
 
-    for (const p of particles) {
-      p.life += dt;
+    const centerX = (rect.x + rect.w / 2) * dpr;
+    const centerY = (rect.y + rect.h / 2) * dpr;
+    const radius = Math.max(rect.w, rect.h) * dpr;
 
-      switch (p.phase) {
-        case 'forming': {
-          const progress = Math.min(p.life / CONFIG.FORMING_MS, 1);
-          const ease = 1 - (1 - progress) * (1 - progress); // 简化 ease
-          // 从边缘飞入 - 使用伪随机
-          const angle = (p.originX * 0.01 + p.originY * 0.007) % (Math.PI * 2);
-          const dist = 100 * (1 + Math.sin(p.windSeed * 3.14));
-          p.x = p.originX + Math.cos(angle) * dist * (1 - ease);
-          p.y = p.originY + Math.sin(angle) * dist * (1 - ease);
-          p.alpha = ease * 0.9;
-          if (p.life >= CONFIG.FORMING_MS) {
-            p.phase = 'swaying';
-            p.life = 0;
-            p.maxLife = CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS);
-          }
-          break;
-        }
-        case 'swaying': {
-          // 简化的风场摆动
-          const t = elapsed * 0.0005;
-          const windX = Math.sin(t + p.windSeed * 6.28) * 2;
-          const windY = Math.cos(t * 0.7 + p.windSeed * 4.71) * 1.2;
-          p.x = p.originX + windX;
-          p.y = p.originY + windY;
-          // 微弱呼吸 - 简化计算
-          p.alpha = 0.85 + Math.sin(p.life * 0.002 + p.windSeed * 6.28) * 0.1;
-          if (p.life >= p.maxLife) {
-            p.phase = 'scattering';
-            p.life = 0;
-            p.scatterAngle = -Math.PI / 2 + (Math.random() - 0.5) * 1.5;
-            p.scatterSpeed = 0.5 + Math.random() * 0.8;
-          }
-          break;
-        }
-        case 'scattering': {
-          // 简化散射计算
-          p.x += Math.cos(p.scatterAngle) * p.scatterSpeed;
-          p.y += Math.sin(p.scatterAngle) * p.scatterSpeed - 0.2; // 轻微上升
-          p.scatterSpeed *= 0.98;
-          p.alpha -= 0.008;
-          if (p.alpha <= 0.05) p.phase = 'fading';
-          break;
-        }
-        case 'fading': {
-          p.alpha = 0;
-          if (p.life > p.maxLife + 800) {
-            p.x = p.originX;
-            p.y = p.originY;
-            p.alpha = 0;
-            p.life = 0;
-            p.phase = 'forming';
-            p.maxLife = CONFIG.SWAY_MIN_MS + Math.random() * (CONFIG.SWAY_MAX_MS - CONFIG.SWAY_MIN_MS);
-          }
-          break;
-        }
-      }
+    const baseGlow = ctx.createRadialGradient(centerX, centerY, radius * 0.08, centerX, centerY, radius * 0.7);
+    baseGlow.addColorStop(0, 'rgba(255,244,214,0.11)');
+    baseGlow.addColorStop(0.42, 'rgba(137,210,212,0.055)');
+    baseGlow.addColorStop(1, 'rgba(13,10,24,0)');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = baseGlow;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      if (p.alpha > 0.01) {
-        if (!colorGroups.has(p.color)) colorGroups.set(p.color, []);
-        colorGroups.get(p.color)!.push(p);
-      }
+    ctx.globalCompositeOperation = 'lighter';
+    for (const orb of orbsRef.current) {
+      const driftX = Math.sin(elapsed * orb.speed + orb.seed * 10) * orb.radius * 0.26;
+      const driftY = Math.cos(elapsed * orb.speed * 0.72 + orb.seed * 8) * orb.radius * 0.18;
+      const pulse = 0.72 + Math.sin(elapsed * 0.001 + orb.seed * 6.28) * 0.22;
+      const size = orb.radius * 2 * pulse;
+      ctx.globalAlpha = orb.alpha;
+      ctx.drawImage(orb.sprite, orb.x + driftX - size / 2, orb.y + driftY - size / 2, size, size);
     }
 
-    // 绘制圆形沙粒
-    colorGroups.forEach((group, color) => {
+    ctx.globalCompositeOperation = 'source-over';
+    particleGroupsRef.current.forEach((group, color) => {
       ctx.fillStyle = color;
       for (const p of group) {
-        ctx.globalAlpha = Math.max(0, Math.min(1, p.alpha));
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
+        p.life += dt;
+
+        switch (p.phase) {
+          case 'forming': {
+            const progress = Math.min(p.life / config.FORMING_MS, 1);
+            const ease = 1 - Math.pow(1 - progress, 3);
+            const angle = p.seed * Math.PI * 2 + p.originX * 0.002 - p.originY * 0.001;
+            const dist = (58 + p.seed * 88) * dpr;
+            p.x = p.originX + Math.cos(angle) * dist * (1 - ease);
+            p.y = p.originY + Math.sin(angle) * dist * (1 - ease);
+            p.alpha = ease * 0.92;
+            if (progress >= 1) {
+              p.phase = 'swaying';
+              p.life = 0;
+              p.maxLife = config.SWAY_MIN_MS + Math.random() * (config.SWAY_MAX_MS - config.SWAY_MIN_MS);
+            }
+            break;
+          }
+          case 'swaying': {
+            const t = elapsed * 0.00065;
+            const windX = Math.sin(t + p.seed * 6.28) * config.WIND_STRENGTH * dpr;
+            const windY = Math.cos(t * 0.72 + p.seed * 4.71) * config.WIND_STRENGTH * 0.46 * dpr;
+            p.x = p.originX + windX;
+            p.y = p.originY + windY;
+            p.alpha = 0.78 + Math.sin(p.life * 0.002 + p.seed * 6.28) * 0.12;
+            if (p.life >= p.maxLife) {
+              p.phase = 'scattering';
+              p.life = 0;
+              p.scatterAngle = -Math.PI / 2 + (Math.random() - 0.5) * 1.2;
+              p.scatterSpeed = (0.32 + Math.random() * 0.62) * dpr;
+            }
+            break;
+          }
+          case 'scattering': {
+            p.x += Math.cos(p.scatterAngle) * p.scatterSpeed;
+            p.y += Math.sin(p.scatterAngle) * p.scatterSpeed - 0.12 * dpr;
+            p.scatterSpeed *= 0.985;
+            p.alpha -= 0.01;
+            if (p.alpha <= 0.04) {
+              p.phase = 'fading';
+            }
+            break;
+          }
+          case 'fading': {
+            p.alpha = 0;
+            if (p.life > 700) {
+              p.x = p.originX;
+              p.y = p.originY;
+              p.life = Math.random() * 220;
+              p.phase = 'forming';
+            }
+            break;
+          }
+        }
+
+        if (p.alpha > 0.01) {
+          ctx.globalAlpha = p.alpha;
+          ctx.fillRect(p.x, p.y, p.size, p.size);
+        }
       }
     });
 
-    // 暗角（在照片区域上加）
-    const rect = drawRectRef.current;
-    if (rect.w > 0 && rect.h > 0) {
-      const cx = (rect.x + rect.w / 2) * dpr;
-      const cy = (rect.y + rect.h / 2) * dpr;
-      const r = Math.max(rect.w, rect.h) * 0.5 * dpr;
-      const grad = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 0.75);
-      grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(0.65, 'rgba(0,0,0,0.1)');
-      grad.addColorStop(1, 'rgba(0,0,0,0.65)');
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
+    const vignette = ctx.createRadialGradient(centerX, centerY, radius * 0.24, centerX, centerY, radius * 0.82);
+    vignette.addColorStop(0, 'rgba(0,0,0,0)');
+    vignette.addColorStop(0.66, 'rgba(0,0,0,0.08)');
+    vignette.addColorStop(1, 'rgba(0,0,0,0.62)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
 
     animRef.current = requestAnimationFrame(animate);
   }, []);
 
-  // ★ 完全清理函数 - 释放所有资源
-  const cleanup = useCallback(() => {
-    // 取消动画
-    if (animRef.current) {
-      cancelAnimationFrame(animRef.current);
-      animRef.current = 0;
-    }
-    
-    // 清空粒子数据
-    particlesRef.current = [];
-    isReadyRef.current = false;
-    
-    // 清空 canvas
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    }
-    
-    // 从管理器注销
-    if (isRegisteredRef.current) {
-      particleManager.unregister(systemIdRef.current, particlesRef.current.length);
-      isRegisteredRef.current = false;
-    }
-    
-    console.log(`🏜️ DreamParticles destroyed: ${systemIdRef.current}`);
-  }, []);
-
-  // 初始化粒子
   useEffect(() => {
-    // ★ 如果要求销毁，不初始化
     if (shouldDestroy || !thumbnailUrl || !visible) {
       cleanup();
       return;
     }
 
     let cancelled = false;
-
     const img = new window.Image();
     img.crossOrigin = 'anonymous';
+    img.decoding = 'async';
     img.src = thumbnailUrl;
     img.onload = () => {
       if (cancelled) return;
 
-      // ★ 延迟一帧，确保容器已完成布局
       requestAnimationFrame(() => {
         if (cancelled) return;
 
         const canvas = canvasRef.current;
-        if (!canvas) return;
-        const parent = canvas.parentElement;
-        if (!parent) return;
+        const parent = canvas?.parentElement;
+        if (!canvas || !parent) return;
 
-        const dpr = window.devicePixelRatio || 1;
         const cssW = parent.clientWidth;
         const cssH = parent.clientHeight;
-
-        // 容器尺寸为 0 时跳过（布局未完成）
         if (cssW < 10 || cssH < 10) {
-          console.warn('🏜️ DreamParticles: container too small, retrying...');
-          setTimeout(() => {
+          window.setTimeout(() => {
             if (!cancelled) img.onload?.(new Event('load'));
           }, 100);
           return;
         }
 
-        // 设置 canvas 物理尺寸（CSS 尺寸由 w-full h-full 控制）
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+        dprRef.current = dpr;
         canvas.width = Math.round(cssW * dpr);
         canvas.height = Math.round(cssH * dpr);
-        canvas.style.width = '';
-        canvas.style.height = '';
 
-        // ★ 计算照片在容器中的实际显示区域（object-contain 语义）
         const rect = calcContainRect(cssW, cssH, img.naturalWidth, img.naturalHeight);
         drawRectRef.current = rect;
 
-        console.log(`🏜️ DreamParticles: container=${cssW}x${cssH}, img=${img.naturalWidth}x${img.naturalHeight}, draw=${Math.round(rect.w)}x${Math.round(rect.h)}@(${Math.round(rect.x)},${Math.round(rect.y)})`);
-
-        // 创建照片显示区域尺寸的离屏 canvas 用于采样
         const offscreen = document.createElement('canvas');
-        offscreen.width = Math.round(rect.w);
-        offscreen.height = Math.round(rect.h);
-        const offCtx = offscreen.getContext('2d');
+        offscreen.width = Math.max(1, Math.round(rect.w));
+        offscreen.height = Math.max(1, Math.round(rect.h));
+        const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
         if (!offCtx) return;
 
-        // 绘制图片到离屏 canvas（填满整个 canvas）
         offCtx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
         const data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height).data;
+        const config = configRef.current;
+        const sampled: { x: number; y: number; r: number; g: number; b: number }[] = [];
+        let seen = 0;
 
-        const particles: SandParticle[] = [];
-        const step = configRef.current.STEP;
-
-        // ★ 先收集所有有效像素位置，然后随机采样以均匀分布
-        const validPixels: {x: number, y: number, r: number, g: number, b: number}[] = [];
-        
-        for (let y = 0; y < offscreen.height; y += step) {
-          for (let x = 0; x < offscreen.width; x += step) {
+        for (let y = 0; y < offscreen.height; y += config.STEP) {
+          for (let x = 0; x < offscreen.width; x += config.STEP) {
             const i = (y * offscreen.width + x) * 4;
-            const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const a = data[i + 3];
 
             if (a < 30) continue;
-            if (r + g + b < 15 || r + g + b > 755) continue;
+            const brightness = r + g + b;
+            if (brightness < 18 || brightness > 750) continue;
 
-            validPixels.push({x, y, r, g, b});
+            seen++;
+            reservoirPush(sampled, { x, y, r, g, b }, seen, config.MAX_PARTICLES);
           }
         }
 
-        // ★ 如果有效像素太多，随机采样以均匀分布
-        let selectedPixels = validPixels;
-        if (validPixels.length > configRef.current.MAX_PARTICLES) {
-          // 随机打乱后取前 MAX_PARTICLES 个
-          selectedPixels = validPixels
-            .sort(() => Math.random() - 0.5)
-            .slice(0, configRef.current.MAX_PARTICLES);
-        }
-
-        // 生成粒子
-        for (const pixel of selectedPixels) {
-          const px = (rect.x + pixel.x) * dpr;
-          const py = (rect.y + pixel.y) * dpr;
-
-          particles.push({
-            x: px, y: py,
-            originX: px, originY: py,
-            color: `rgb(${pixel.r},${pixel.g},${pixel.b})`,
-            size: (0.8 + Math.random() * 1.6) * dpr,
-            windSeed: Math.random(),
+        const particles: PhotoParticle[] = [];
+        const groups = new Map<string, PhotoParticle[]>();
+        for (const pixel of sampled) {
+          const color = quantizeColor(pixel.r, pixel.g, pixel.b);
+          const p: PhotoParticle = {
+            x: (rect.x + pixel.x) * dpr,
+            y: (rect.y + pixel.y) * dpr,
+            originX: (rect.x + pixel.x) * dpr,
+            originY: (rect.y + pixel.y) * dpr,
+            color,
+            size: (1 + Math.random() * 1.45) * dpr,
+            seed: Math.random(),
             alpha: 0,
-            life: Math.random() * 1200,
-            maxLife: configRef.current.SWAY_MIN_MS + Math.random() * (configRef.current.SWAY_MAX_MS - configRef.current.SWAY_MIN_MS),
+            life: Math.random() * config.FORMING_MS,
+            maxLife: config.SWAY_MIN_MS + Math.random() * (config.SWAY_MAX_MS - config.SWAY_MIN_MS),
             phase: 'forming',
             scatterAngle: 0,
             scatterSpeed: 0,
-          });
+          };
+          particles.push(p);
+          if (!groups.has(color)) groups.set(color, []);
+          groups.get(color)!.push(p);
         }
 
+        cleanup();
         particlesRef.current = particles;
+        particleGroupsRef.current = groups;
+        orbsRef.current = buildAtmosphereOrbs(rect, dpr, config.ORB_COUNT);
         isReadyRef.current = true;
         startTimeRef.current = performance.now();
-        
-        // ★ 注册到管理器
+        lastFrameRef.current = 0;
+
         particleManager.register(systemIdRef.current, particles.length);
         isRegisteredRef.current = true;
-        
-        console.log(`🏜️ DreamParticles initialized: ${systemIdRef.current}, particles=${particles.length}, total=${particleManager.getStats().totalParticles}`);
-      }); // end requestAnimationFrame
-    }; // end img.onload
+        if (!animRef.current) {
+          animRef.current = requestAnimationFrame(animate);
+        }
+      });
+    };
 
-    return () => { 
-      cancelled = true; 
+    return () => {
+      cancelled = true;
       cleanup();
     };
-  }, [thumbnailUrl, visible, particleCount, shouldDestroy, cleanup]);
+  }, [thumbnailUrl, visible, particleCount, shouldDestroy, cleanup, animate]);
 
-  // 动画控制
   useEffect(() => {
-    // ★ 如果要求销毁，不启动动画
     if (shouldDestroy || !visible) {
       cleanup();
       return;
     }
-    
+
     lastFrameRef.current = 0;
     animRef.current = requestAnimationFrame(animate);
     return () => cleanup();
   }, [visible, animate, shouldDestroy, cleanup]);
 
-  // ★ 如果要求销毁，返回 null 不渲染
   if (shouldDestroy || !visible) return null;
 
   return (
     <canvas
       ref={canvasRef}
       className="absolute inset-0 w-full h-full"
-      style={{
-        zIndex: 0,
-        pointerEvents: 'none',
-      }}
+      style={{ zIndex: 0, pointerEvents: 'none' }}
     />
   );
 }

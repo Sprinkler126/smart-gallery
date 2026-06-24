@@ -258,13 +258,19 @@ export class ImageProcessor {
   async getImageDimensions(imagePath) {
     try {
       const metadata = await sharp(imagePath).metadata();
+      const rawWidth = metadata.width || 0;
+      const rawHeight = metadata.height || 0;
+      const shouldSwap = [5, 6, 7, 8].includes(Number(metadata.orientation));
       return {
-        width: metadata.width,
-        height: metadata.height,
+        width: shouldSwap ? rawHeight : rawWidth,
+        height: shouldSwap ? rawWidth : rawHeight,
+        rawWidth,
+        rawHeight,
+        orientation: metadata.orientation || 1,
         format: metadata.format
       };
     } catch {
-      return { width: 0, height: 0, format: 'unknown' };
+      return { width: 0, height: 0, rawWidth: 0, rawHeight: 0, orientation: 1, format: 'unknown' };
     }
   }
 

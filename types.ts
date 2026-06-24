@@ -19,6 +19,9 @@ export interface Photo {
   dimensions?: {
     width: number;
     height: number;
+    rawWidth?: number;
+    rawHeight?: number;
+    orientation?: number;
     format: string;
   };
   sourceId?: string;

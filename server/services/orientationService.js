@@ -7,8 +7,39 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const CACHE_FILE = path.join(__dirname, '../orientation-cache.json');
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function orientDimensions(width = 0, height = 0, orientation = 1) {
+  const numericOrientation = Number(orientation) || 1;
+  if ([5, 6, 7, 8].includes(numericOrientation)) {
+    return { width: height, height: width, orientation: numericOrientation };
+  }
+
+  return { width, height, orientation: numericOrientation };
+}
+
+function classifyOrientation(width, height) {
+  if (!width || !height) return 'landscape';
+
+  const aspectRatio = width / height;
+  if (aspectRatio > 1.06) return 'landscape';
+  if (aspectRatio < 0.94) return 'portrait';
+  return 'square';
+}
+
+function buildCacheKey(photo, imageUrl) {
+  const dimensions = photo?.dimensions || {};
+  return [
+    imageUrl || '',
+    photo?.lastModified || '',
+    dimensions.width || 0,
+    dimensions.height || 0,
+    dimensions.rawWidth || 0,
+    dimensions.rawHeight || 0,
+    dimensions.orientation || ''
+  ].join('|');
+}
 
 class OrientationService {
   constructor() {
@@ -44,46 +75,40 @@ class OrientationService {
     }
   }
 
-  async getOrientation(photoId, imageUrl, dimensions) {
+  async getOrientation(photo, imageUrl) {
+    const photoId = photo.id;
+    const cacheKey = buildCacheKey(photo, imageUrl);
+
     // Check cache first
     if (this.cache?.orientations?.[photoId]) {
       const cached = this.cache.orientations[photoId];
-      if (cached.url === imageUrl) {
+      if (cached.cacheKey === cacheKey || (!cached.cacheKey && cached.url === imageUrl && cached.lastModified === photo.lastModified)) {
         return cached.orientation;
       }
     }
     
     let width, height;
+    const dimensions = photo.dimensions;
     
     // Use dimensions if provided (from photo metadata)
-    if (dimensions && dimensions.width && dimensions.height) {
+    if (dimensions && dimensions.width && dimensions.height && dimensions.orientation) {
       width = dimensions.width;
       height = dimensions.height;
     } else {
       // Fallback: try to read from image file
       try {
-        const cleanPath = imageUrl && imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
-        const fullPath = path.join(__dirname, '../../', cleanPath);
+        const fullPath = photo.originalPath || path.join(__dirname, '../../', imageUrl?.replace(/^\/+/, '') || '');
         const metadata = await sharp(fullPath).metadata();
-        width = metadata.width || 0;
-        height = metadata.height || 0;
+        const oriented = orientDimensions(metadata.width || 0, metadata.height || 0, metadata.orientation || 1);
+        width = oriented.width;
+        height = oriented.height;
       } catch (error) {
         console.error(`Error reading image for ${photoId}:`, error.message);
         return 'landscape'; // Default
       }
     }
     
-    // Determine orientation using aspect ratio
-    // More accurate threshold: 1.1 instead of 1.2
-    const aspectRatio = width / height;
-    let orientation;
-    if (aspectRatio > 1.1) {
-      orientation = 'landscape';  // Width > Height by 10%
-    } else if (aspectRatio < 0.9) {
-      orientation = 'portrait';   // Height > Width by 10%
-    } else {
-      orientation = 'square';     // Nearly square (within 10%)
-    }
+    const orientation = classifyOrientation(width, height);
     
     // Update cache
     if (!this.cache) {
@@ -99,6 +124,8 @@ class OrientationService {
     this.cache.orientations[photoId] = {
       orientation,
       url: imageUrl,
+      cacheKey,
+      lastModified: photo.lastModified || '',
       width,
       height
     };
@@ -117,9 +144,11 @@ class OrientationService {
       const batch = photos.slice(i, i + batchSize);
       await Promise.all(
         batch.map(async (photo) => {
-          const url = photo.thumbnail || photo.url;
-          orientations[photo.id] = await this.getOrientation(photo.id, url, photo.dimensions);
-          if (this.cache?.orientations[photo.id] && this.cache.orientations[photo.id].url === url) {
+          const url = photo.thumbnailPath || photo.thumbnail || photo.originalPath || photo.url;
+          const before = this.cache?.orientations?.[photo.id];
+          orientations[photo.id] = await this.getOrientation(photo, url);
+          const after = this.cache?.orientations?.[photo.id];
+          if (before && after && before.cacheKey === after.cacheKey) {
             cacheHits++;
           } else {
             cacheMisses++;
