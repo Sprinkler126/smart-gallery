@@ -1687,26 +1687,26 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 onClick={(e) => { e.stopPropagation(); setIsRandomOrder(true); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${isRandomOrder ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                🔀 Random
+                随机
               </button>
             </div>
           </div>
 
           {/* Image Quality */}
           <div className="space-y-2 mb-4">
-            <p className="text-white/60 text-xs flex items-center gap-2">🖼�?Quality</p>
+            <p className="text-white/60 text-xs flex items-center gap-2"><Image size={14} /> 画质</p>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); setImageQuality('display'); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${imageQuality === 'display' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                �?4K 压缩
+                4K 压缩
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setImageQuality('original'); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${imageQuality === 'original' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                💎 无损原图
+                无损原图
               </button>
             </div>
           </div>
@@ -1730,18 +1730,18 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               ))}
             </div>
             <p className="text-white/35 text-[11px]">
-              {PERFORMANCE_BUDGET_MB[performanceMode]}MB cache budget
+              缓存预算 {PERFORMANCE_BUDGET_MB[performanceMode]}MB
             </p>
           </div>
 
           {/* Orientation */}
           <div className="space-y-2 mb-4">
-            <p className="text-white/60 text-xs flex items-center gap-2"><Crop size={14} /> Orientation</p>
+            <p className="text-white/60 text-xs flex items-center gap-2"><Crop size={14} /> 方向</p>
             <div className="grid grid-cols-3 gap-2">
               {([
-                { key: 'all' as const, icon: Image, label: 'All' },
-                { key: 'landscape' as const, icon: Monitor, label: 'Land' },
-                { key: 'portrait' as const, icon: Columns3, label: 'Port' },
+                { key: 'all' as const, icon: Image, label: '全部' },
+                { key: 'landscape' as const, icon: Monitor, label: '横向' },
+                { key: 'portrait' as const, icon: Columns3, label: '竖向' },
               ]).map(({ key, icon: Icon, label }) => (
                 <button
                   key={key}
@@ -1758,7 +1758,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           {/* Particle Toggle + Slider */}
           <div className="space-y-2 mb-4">
             <div className="flex items-center justify-between">
-              <span className="text-white/70 text-sm">�?粒子效果</span>
+              <span className="text-white/70 text-sm">粒子效果</span>
               <button
                 onClick={(e) => { e.stopPropagation(); setParticleLevel((prev) => prev > 0 ? 0 : 5); }}
                 className={`w-12 h-6 rounded-full transition-all ${
@@ -1791,19 +1791,19 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
           {/* Music Mode */}
           <div className="space-y-2 mb-4">
-            <p className="text-white/60 text-xs flex items-center gap-2">🎵 音乐模式</p>
+            <p className="text-white/60 text-xs flex items-center gap-2"><Music size={14} /> 音乐模式</p>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); setMusicMode('background'); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${musicMode === 'background' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                🎧 背景�?
+                背景
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setMusicMode('companion'); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${musicMode === 'companion' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                🎶 伴随
+                伴随
               </button>
             </div>
             <p className="text-white/30 text-[10px]">
@@ -1905,9 +1905,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 {!isPlaying && idleSeconds > 0 && (
                   <div className="mt-3 text-white/30 text-xs">
                     {idleSeconds < 10 ? (
-                      <span>�?{10 - idleSeconds}秒后自动播放</span>
+                      <span>{10 - idleSeconds} 秒后自动播放</span>
                     ) : (
-                      <span>▶️ 即将开�?..</span>
+                      <span>即将开始...</span>
                     )}
                   </div>
                 )}

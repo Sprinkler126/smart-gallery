@@ -156,6 +156,7 @@ const App: React.FC = () => {
   const [idlePaused, setIdlePaused] = useState(false);
 
   // 鏄惁鏄剧ず绠＄悊鍔熻兘锛堝彧鏈夋湰鍦拌闂墠鏄剧ず锛?
+  const showRemoteTools = isApiAvailable;
   const showAdminFeatures = isLocalAccess() && isApiAvailable;
 
   // Get app name and photographer name from config or fallback
@@ -634,19 +635,9 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Refresh & Reset Buttons - 鍙湪鏈湴鏄剧ず */}
-            {showAdminFeatures && (
+            {/* Remote-safe tools */}
+            {showRemoteTools && (
               <div className="hidden md:flex items-center gap-2">
-                <button
-                  onClick={() => setShowCreativePanel(true)}
-                  className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
-                  title="Creative Tools"
-                  aria-label="Creative Tools"
-                >
-                  <Sparkles size={18} />
-                </button>
-
-                {/* AI Analysis Button */}
                 <button
                   onClick={() => {
                     setAiAnalysisPhoto(undefined);
@@ -657,6 +648,20 @@ const App: React.FC = () => {
                   aria-label="AI Analysis"
                 >
                   <Brain size={18} />
+                </button>
+              </div>
+            )}
+
+            {/* Admin-only tools */}
+            {showAdminFeatures && (
+              <div className="hidden md:flex items-center gap-2">
+                <button
+                  onClick={() => setShowCreativePanel(true)}
+                  className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
+                  title="Creative Tools"
+                  aria-label="Creative Tools"
+                >
+                  <Sparkles size={18} />
                 </button>
 
                 {/* Multi-select Toggle */}
@@ -1040,6 +1045,7 @@ const App: React.FC = () => {
         <AIAnalysisPanel
           photo={aiAnalysisPhoto}
           onClose={() => setShowAIAnalysis(false)}
+          allowSettings={showAdminFeatures}
         />
       )}
 

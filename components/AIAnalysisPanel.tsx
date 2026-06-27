@@ -11,6 +11,7 @@ import {
 interface AIAnalysisPanelProps {
   photo?: Photo;
   onClose: () => void;
+  allowSettings?: boolean;
 }
 
 interface AIConfig {
@@ -65,7 +66,7 @@ const buildProviderJson = (config: Pick<AIConfig, 'enableAutoAnalysis' | 'maxCon
     providers: normalizeProviderOrder(config.aiProviders),
   }, null, 2);
 
-const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => {
+const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allowSettings = false }) => {
   const [activeTab, setActiveTab] = useState<'analysis' | 'settings' | 'stats' | 'search'>(photo ? 'analysis' : 'search');
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -99,8 +100,10 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
 
   // Load current config
   useEffect(() => {
-    loadConfig();
-  }, []);
+    if (allowSettings) {
+      loadConfig();
+    }
+  }, [allowSettings]);
 
   // Load analysis when photo changes
   useEffect(() => {
@@ -123,7 +126,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
       if (data.success) {
         const nextConfig = {
           apiEndpoint: data.data.aiApiEndpoint || '',
-          apiKey: data.data.aiApiKey ? '••••••••' : '',
+          apiKey: data.data.aiApiKey ? '********' : '',
           model: data.data.aiModel || 'multimodal-large',
           enableAutoAnalysis: data.data.enableAutoAnalysis || false,
           maxConcurrentAnalysis: data.data.maxConcurrentAnalysis || 2,
@@ -189,7 +192,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           aiApiEndpoint: config.apiEndpoint,
-          aiApiKey: config.apiKey === '••••••••' ? undefined : config.apiKey,
+          aiApiKey: config.apiKey === '********' ? undefined : config.apiKey,
           aiModel: config.model,
           enableAutoAnalysis: config.enableAutoAnalysis,
           maxConcurrentAnalysis: config.maxConcurrentAnalysis,
@@ -378,7 +381,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
     });
 
     try {
-      const isSavedMaskedProvider = provider.apiKey === '••••••••';
+      const isSavedMaskedProvider = provider.apiKey === '********';
       const response = await adminFetch('/photowall/api/analysis/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -525,7 +528,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         <div className="flex flex-col items-center justify-center py-12">
           <AlertCircle size={48} className="text-red-400 mb-4" />
           <p className="text-red-400 mb-4">{error}</p>
-          {error.includes('not configured') ? (
+          {error.includes('not configured') && allowSettings ? (
             <button
               onClick={() => setActiveTab('settings')}
               className="px-4 py-2 bg-gold text-obsidian rounded-lg hover:bg-gold/90 transition-colors"
@@ -1247,7 +1250,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
             { id: 'analysis', label: 'Analysis', icon: Sparkles },
             ...(photo ? [] : [{ id: 'search', label: 'Search', icon: Search }]),
             ...(photo ? [] : [{ id: 'stats', label: 'Stats', icon: BarChart3 }]),
-            { id: 'settings', label: 'Settings', icon: Settings },
+            ...(allowSettings ? [{ id: 'settings', label: 'Settings', icon: Settings }] : []),
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1267,7 +1270,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
         {/* Content */}
         <div className="p-4 sm:p-6 overflow-y-auto max-h-[68svh] sm:max-h-[60vh]">
           {activeTab === 'analysis' && renderAnalysis()}
-          {activeTab === 'settings' && renderSettings()}
+          {allowSettings && activeTab === 'settings' && renderSettings()}
           {!photo && activeTab === 'stats' && renderStats()}
           {!photo && activeTab === 'search' && renderSearch()}
         </div>
