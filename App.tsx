@@ -8,6 +8,7 @@ import AdminPanel from './components/AdminPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
 import CreativePanel from './components/CreativePanel';
 import ExifFramePanel from './components/ExifFramePanel';
+import PixelStretchPanel from './components/PixelStretchPanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
 import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig } from 'lucide-react';
@@ -139,6 +140,7 @@ const App: React.FC = () => {
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
   const [aiAnalysisPhoto, setAiAnalysisPhoto] = useState<Photo | undefined>(undefined);
   const [showCreativePanel, setShowCreativePanel] = useState(false);
+  const [pixelStretchPhotoId, setPixelStretchPhotoId] = useState<string | null>(null);
   const [exifFramePhoto, setExifFramePhoto] = useState<Photo | undefined>(undefined);
   
   // Mobile overlay state - for touch devices
@@ -559,7 +561,7 @@ const App: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && performSearch()}
-                placeholder="鎼滅储..."
+                placeholder="搜索..."
                 className="bg-transparent border-none outline-none text-[16px] sm:text-sm text-white placeholder-gray-500 w-16 sm:w-28 md:w-48 min-w-0"
               />
               {searchQuery && (
@@ -580,9 +582,9 @@ const App: React.FC = () => {
                     ? 'border-gold text-gold'
                     : 'border-gray-600 text-gray-500 hover:border-gray-400'
                 }`}
-                title={searchMode === 'fuzzy' ? '妯＄硦鎼滅储 - 鐐瑰嚮鍒囨崲鏍囩鎼滅储' : '鏍囩鎼滅储 - 鐐瑰嚮鍒囨崲妯＄硦鎼滅储'}
+                title={searchMode === 'fuzzy' ? '模糊搜索 - 点击切换语义搜索' : '语义搜索 - 点击切换模糊搜索'}
               >
-                {searchMode === 'fuzzy' ? '妯＄硦' : '鏍囩'}
+                {searchMode === 'fuzzy' ? '模糊' : '语义'}
               </button>
               <button
                 onClick={performSearch}
@@ -792,13 +794,13 @@ const App: React.FC = () => {
               <>
                 <p>No photos found for "{searchQuery}"</p>
                 <p className="text-sm text-gray-500 mt-2">
-                  褰撳墠妯″紡: {searchMode === 'fuzzy' ? '妯＄硦鎼滅储' : '璇箟鎼滅储'}
+                  当前模式: {searchMode === 'fuzzy' ? '模糊搜索' : '语义搜索'}
                 </p>
                 <button 
                   onClick={clearSearch}
                   className="mt-4 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors"
                 >
-                  娓呴櫎鎼滅储
+                  清除搜索
                 </button>
               </>
             ) : (
@@ -1015,6 +1017,9 @@ const App: React.FC = () => {
           onExifFrame={showAdminFeatures ? () => {
             setExifFramePhoto(filteredPhotos[selectedPhotoIndex]);
           } : undefined}
+          onPixelStretch={() => {
+            setPixelStretchPhotoId(filteredPhotos[selectedPhotoIndex].id);
+          }}
         />
       )}
 
@@ -1041,6 +1046,14 @@ const App: React.FC = () => {
       {showCreativePanel && (
         <CreativePanel
           onClose={() => setShowCreativePanel(false)}
+        />
+      )}
+
+      {pixelStretchPhotoId && (
+        <PixelStretchPanel
+          photos={photos}
+          initialPhotoId={pixelStretchPhotoId}
+          onClose={() => setPixelStretchPhotoId(null)}
         />
       )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronLeft, ChevronRight, Info, MapPin, Camera, Aperture, ImageOff, ZoomIn, ZoomOut, Trash2, Brain } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info, MapPin, Camera, Aperture, ImageOff, ZoomIn, ZoomOut, Trash2, Brain, Wand2 } from 'lucide-react';
 import { Photo } from '../types';
 
 interface LightboxProps {
@@ -12,9 +12,10 @@ interface LightboxProps {
   onDelete?: (photoId: string) => void;
   onAIAnalysis?: () => void;
   onExifFrame?: () => void;
+  onPixelStretch?: () => void;
 }
 
-const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, hasNext, hasPrev, onDelete, onAIAnalysis, onExifFrame }) => {
+const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, hasNext, hasPrev, onDelete, onAIAnalysis, onExifFrame, onPixelStretch }) => {
   const [showInfo, setShowInfo] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -313,6 +314,18 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
           title="EXIF Frame"
         >
           <Camera size={24} />
+        </button>
+      )}
+
+      {/* Pixel Stretch Button */}
+      {onPixelStretch && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onPixelStretch(); }}
+          className="absolute top-4 left-40 md:top-6 md:left-44 z-50 p-3 md:p-2 text-gray-400 hover:text-gold active:text-gold transition-colors bg-black/30 hover:bg-black/50 rounded-full backdrop-blur-sm touch-manipulation"
+          title="Pixel Stretch"
+          aria-label="Pixel Stretch"
+        >
+          <Wand2 size={24} />
         </button>
       )}
 

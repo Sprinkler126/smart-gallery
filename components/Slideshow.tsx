@@ -23,6 +23,12 @@ type TransitionType = 'crossfade' | 'kenburns' | 'pageflip';
 type PerformanceMode = 'auto' | 'tv' | 'quality';
 type PlaybackPressure = 'low' | 'normal' | 'high';
 
+interface LeavingSlide {
+  id: string;
+  title: string;
+  url: string;
+}
+
 interface KenBurnsTransform {
   startScale: number; endScale: number;
   startX: number; endX: number;
@@ -59,6 +65,8 @@ const fetchOrientations = async (): Promise<Record<string, 'landscape' | 'portra
 };
 
 const TRANSITION_MS = 1200;
+const PAGE_TRANSITION_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const NAVIGATION_LOCK_MS = 420;
 const PROGRESS_TICK = 100; // ms
 
 type ImageFetchPriority = 'high' | 'low' | 'auto';
@@ -102,6 +110,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   /* ---------- 所�?UI 状�?---------- */
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [prevIndex, setPrevIndex]       = useState<number | null>(null);
+  const [leavingSlide, setLeavingSlide] = useState<LeavingSlide | null>(null);
   const [isPlaying, setIsPlaying]       = useState(false); // 默认暂停�?0秒后自动开�?
   const [intervalSec, setIntervalSec]   = useState<IntervalOption>(10);
   const [showControls, setShowControls] = useState(true);
@@ -142,6 +151,11 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const containerRef     = useRef<HTMLDivElement>(null);
   const controlsTimer    = useRef<ReturnType<typeof setTimeout>>();
   const prevIndexTimer   = useRef<ReturnType<typeof setTimeout>>();
+  const flipStartTimer   = useRef<ReturnType<typeof setTimeout>>();
+  const navigationLockUntil = useRef(0);
+  const displayedUrlRef  = useRef('');
+  const currentPhotoRef  = useRef<Photo | undefined>(undefined);
+  const effectiveUrlRef  = useRef('');
   const kenBurnsCache    = useRef<Map<number, KenBurnsTransform>>(new Map());
   const audioRef         = useRef<HTMLAudioElement | null>(null);
   const manualNavigationTimes = useRef<number[]>([]);
@@ -417,6 +431,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   useEffect(() => { performanceModeRef.current = performanceMode; }, [performanceMode]);
   const lastImageLoadMsRef = useRef(lastImageLoadMs);
   useEffect(() => { lastImageLoadMsRef.current = lastImageLoadMs; }, [lastImageLoadMs]);
+  useEffect(() => { displayedUrlRef.current = displayedUrl; }, [displayedUrl]);
 
   const getPlaybackPressure = useCallback((): PlaybackPressure => {
     const mode = performanceModeRef.current;
@@ -708,6 +723,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     ? currentPhoto.url
     : '';
 
+  useEffect(() => { currentPhotoRef.current = currentPhoto; }, [currentPhoto]);
+  useEffect(() => { effectiveUrlRef.current = effectiveUrl; }, [effectiveUrl]);
+
   // 加载当前照片的分析结�?
   useEffect(() => {
     if (!currentPhoto) {
@@ -748,15 +766,32 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     const { isLoading: loading, filteredLength: len } = playStateRef.current;
     if (loading || len <= 1) return;
 
+    const now = Date.now();
+    if (now < navigationLockUntil.current) return;
+    navigationLockUntil.current = now + NAVIGATION_LOCK_MS;
+
     if (reason === 'manual') {
-      const now = Date.now();
       manualNavigationTimes.current = [...manualNavigationTimes.current, now]
         .filter((time) => now - time <= FAST_NAV_WINDOW_MS);
     }
 
+    const leavingPhoto = currentPhotoRef.current;
+    const leavingUrl = displayedUrlRef.current || leavingPhoto?.previewUrl || leavingPhoto?.thumbnail || effectiveUrlRef.current;
+    if (leavingPhoto && leavingUrl) {
+      setLeavingSlide({
+        id: leavingPhoto.id,
+        title: leavingPhoto.title,
+        url: leavingUrl,
+      });
+    }
+
     // 设置翻页方向（用�?pageflip 效果�?
     setFlipDirection(direction === 1 ? 'right' : 'left');
-    setIsFlipping(true);
+    setIsFlipping(false);
+    if (flipStartTimer.current) clearTimeout(flipStartTimer.current);
+    flipStartTimer.current = setTimeout(() => {
+      setIsFlipping(true);
+    }, 20);
 
     setCurrentIndex((prev) => {
       setPrevIndex(prev);
@@ -778,6 +813,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
     prevIndexTimer.current = setTimeout(() => {
       setPrevIndex(null);
+      setLeavingSlide(null);
       setIsFlipping(false);
     }, TRANSITION_MS + 200);
   }, [isRandomOrder, shuffledIndices]); // 依赖随机播放状�?
@@ -1227,6 +1263,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   /* ================================================================ */
   useEffect(() => () => {
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    if (flipStartTimer.current) clearTimeout(flipStartTimer.current);
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
     
     // �?清理音频
@@ -1322,22 +1359,25 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           {currentPhoto && !isPortrait && (
             <div className="relative w-full h-full overflow-hidden transition-all duration-500 ease-out">
               {/* Exiting image - with page flip animation */}
-              {prevIndex !== null && filteredPhotos[prevIndex] && transition === 'pageflip' && isFlipping && (
+              {leavingSlide && transition === 'pageflip' && isFlipping && (
                 <div
                   className="absolute inset-0 flex items-center justify-center"
                   style={{ 
                     zIndex: 2,
                     transformOrigin: flipDirection === 'right' ? 'left center' : 'right center',
-                    animation: `pageFlipOut${flipDirection === 'right' ? 'Right' : 'Left'} ${TRANSITION_MS}ms ease-in-out forwards`,
+                    animation: `pageFlipOut${flipDirection === 'right' ? 'Right' : 'Left'} ${TRANSITION_MS}ms ${PAGE_TRANSITION_EASE} forwards`,
                     transformStyle: 'preserve-3d',
+                    willChange: 'transform, opacity',
+                    backfaceVisibility: 'hidden',
                   }}
                 >
                   <img
-                    src={filteredPhotos[prevIndex].url}
-                    alt=""
+                    src={leavingSlide.url}
+                    alt={leavingSlide.title}
                     className="max-w-full max-h-full object-contain"
                     style={{
                       backfaceVisibility: 'hidden',
+                      transform: 'translateZ(0)',
                     }}
                   />
                   {/* 翻页时的背面阴影效果 */}
@@ -1352,14 +1392,14 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               )}
               
               {/* Exiting image - normal fade */}
-              {prevIndex !== null && filteredPhotos[prevIndex] && transition !== 'pageflip' && (
+              {leavingSlide && transition !== 'pageflip' && (
                 <div
                   className="absolute inset-0 flex items-center justify-center"
-                  style={{ zIndex: 0, opacity: 0, transition: `opacity ${TRANSITION_MS}ms ease` }}
+                  style={{ zIndex: 2, animation: `fadeOutSlide ${TRANSITION_MS}ms ease forwards`, willChange: 'opacity' }}
                 >
                   <img
-                    src={filteredPhotos[prevIndex].url}
-                    alt=""
+                    src={leavingSlide.url}
+                    alt={leavingSlide.title}
                     className="max-w-full max-h-full object-contain"
                   />
                 </div>
@@ -1421,10 +1461,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                     ? 'none'
                     : `opacity ${TRANSITION_MS}ms ease`,
                   animation: transition === 'pageflip' && isFlipping
-                    ? `pageFlipIn${flipDirection === 'right' ? 'Right' : 'Left'} ${TRANSITION_MS}ms ease-in-out forwards`
+                    ? `pageFlipIn${flipDirection === 'right' ? 'Right' : 'Left'} ${TRANSITION_MS}ms ${PAGE_TRANSITION_EASE} forwards`
                     : undefined,
                   transformOrigin: flipDirection === 'right' ? 'right center' : 'left center',
                   transformStyle: 'preserve-3d',
+                  willChange: transition === 'pageflip' && isFlipping ? 'transform, opacity' : 'opacity',
+                  backfaceVisibility: 'hidden',
                 }}
               >
                 <div
@@ -1444,6 +1486,8 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                     alt={currentPhoto.title}
                     className="max-w-full max-h-full object-contain select-none"
                     draggable={false}
+                    decoding="async"
+                    style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
                   />
                 </div>
               </div>
@@ -1463,6 +1507,20 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               )}
             </div>
             <div className="flex-1 md:flex-[2] h-full relative overflow-hidden">
+              {leavingSlide && (
+                <img
+                  src={leavingSlide.url}
+                  alt={leavingSlide.title}
+                  className="absolute inset-0 w-full h-full object-contain"
+                  draggable={false}
+                  decoding="async"
+                  style={{
+                    zIndex: 4,
+                    animation: `fadeOutSlide ${TRANSITION_MS}ms ease forwards`,
+                    willChange: 'opacity',
+                  }}
+                />
+              )}
               {/* Ken Burns wrapper for portrait */}
               <div
                 className="w-full h-full"
@@ -1931,47 +1989,70 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
             opacity: 0.8;
           }
         }
+
+        @keyframes fadeOutSlide {
+          0% {
+            opacity: 1;
+            transform: scale(1) translateZ(0);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(1.015) translateZ(0);
+          }
+        }
         
         @keyframes pageFlipOutRight {
           0% {
-            transform: rotateY(0deg);
+            transform: rotateY(0deg) translateZ(0);
             opacity: 1;
           }
+          55% {
+            opacity: 0.92;
+          }
           100% {
-            transform: rotateY(-90deg);
-            opacity: 0.3;
+            transform: rotateY(-86deg) translateZ(0);
+            opacity: 0;
           }
         }
         
         @keyframes pageFlipOutLeft {
           0% {
-            transform: rotateY(0deg);
+            transform: rotateY(0deg) translateZ(0);
             opacity: 1;
           }
+          55% {
+            opacity: 0.92;
+          }
           100% {
-            transform: rotateY(90deg);
-            opacity: 0.3;
+            transform: rotateY(86deg) translateZ(0);
+            opacity: 0;
           }
         }
         
         @keyframes pageFlipInRight {
           0% {
-            transform: rotateY(90deg);
-            opacity: 0.3;
+            transform: rotateY(86deg) translateZ(0);
+            opacity: 0;
+          }
+          35% {
+            opacity: 0.92;
           }
           100% {
-            transform: rotateY(0deg);
+            transform: rotateY(0deg) translateZ(0);
             opacity: 1;
           }
         }
         
         @keyframes pageFlipInLeft {
           0% {
-            transform: rotateY(-90deg);
-            opacity: 0.3;
+            transform: rotateY(-86deg) translateZ(0);
+            opacity: 0;
+          }
+          35% {
+            opacity: 0.92;
           }
           100% {
-            transform: rotateY(0deg);
+            transform: rotateY(0deg) translateZ(0);
             opacity: 1;
           }
         }
