@@ -216,9 +216,14 @@ const CreativePanel: React.FC<CreativePanelProps> = ({ onClose }) => {
   }, [selection, templateId, templates]);
 
   const templateChoices = useMemo(() => {
-    const recommended = new Map((selection?.recommendedTemplates || []).map(template => [template.id, template]));
+    const recommended = new Map<string, CollageTemplate>(
+      (selection?.recommendedTemplates || []).map((template): [string, CollageTemplate] => [template.id, template])
+    );
     return templates
-      .map(template => ({ ...template, ...(recommended.get(template.id) || {}) }))
+      .map(template => {
+        const recommendedTemplate = recommended.get(template.id);
+        return recommendedTemplate ? { ...template, ...recommendedTemplate } : template;
+      })
       .sort((a, b) => {
         const aFits = selectedPhotos.length >= a.minPhotos && selectedPhotos.length <= a.maxPhotos ? 1 : 0;
         const bFits = selectedPhotos.length >= b.minPhotos && selectedPhotos.length <= b.maxPhotos ? 1 : 0;

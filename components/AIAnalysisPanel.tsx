@@ -735,7 +735,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose }) => 
             />
           </div>
           <p className="text-xs text-gray-500">
-            Please don't close this window
+            Server-side job is running; you can reopen this panel and check recent jobs later.
           </p>
         </div>
       );

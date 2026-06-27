@@ -11,6 +11,7 @@ interface ProtectedImageProps {
   lazy?: boolean;
   threshold?: number;
   rootMargin?: string;
+  releaseOnExit?: boolean;
   placeholderColor?: string;
 }
 
@@ -35,6 +36,7 @@ const ProtectedImage: React.FC<ProtectedImageProps> = ({
   lazy = true,
   threshold = 0.1,
   rootMargin = '100px',
+  releaseOnExit = true,
   placeholderColor = '#1a1a1a',
 }) => {
   const [isLoaded, setIsLoaded] = useState(false);
@@ -54,6 +56,12 @@ const ProtectedImage: React.FC<ProtectedImageProps> = ({
     return false;
   }, []);
 
+  useEffect(() => {
+    setIsLoaded(false);
+    setError(false);
+    setHighResSrc(null);
+  }, [src]);
+
   // Cleanup observer on unmount
   useEffect(() => {
     return () => {
@@ -65,16 +73,20 @@ const ProtectedImage: React.FC<ProtectedImageProps> = ({
 
   // Set up Intersection Observer for lazy loading
   useEffect(() => {
-    if (isInView || !containerRef.current || !lazy) return;
+    if (!containerRef.current || !lazy) return;
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             setIsInView(true);
-            if (observerRef.current) {
-              observerRef.current.unobserve(entry.target);
-            }
+            return;
+          }
+
+          if (releaseOnExit) {
+            setIsInView(false);
+            setIsLoaded(false);
+            setHighResSrc(null);
           }
         });
       },
@@ -91,22 +103,34 @@ const ProtectedImage: React.FC<ProtectedImageProps> = ({
         observerRef.current.disconnect();
       }
     };
-  }, [lazy, threshold, rootMargin, isInView]);
+  }, [lazy, threshold, rootMargin, releaseOnExit]);
 
   // Load high-res image when in view
   useEffect(() => {
     if (!isInView || highResSrc) return;
+    let cancelled = false;
 
     // Preload the high-res image
     const img = new Image();
-    img.src = src;
+    setError(false);
     
     img.onload = () => {
+      if (cancelled) return;
       setHighResSrc(src);
     };
     
     img.onerror = () => {
+      if (cancelled) return;
       setError(true);
+    };
+
+    img.src = src;
+
+    return () => {
+      cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+      img.src = '';
     };
   }, [isInView, src, highResSrc]);
 

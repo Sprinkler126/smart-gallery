@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs-extra';
+import crypto from 'crypto';
 import orientationService from '../services/orientationService.js';
 import { CreativeService } from '../services/creativeService.js';
 import { ExifFrameService } from '../services/exifFrameService.js';
@@ -16,6 +17,7 @@ const fetch = globalThis.fetch || (await import('node-fetch')).default;
 export function createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config) {
   const router = Router();
   const adminToken = process.env.ADMIN_TOKEN || config.adminToken || '';
+  const resetJobs = new Map();
   const creativeService = new CreativeService({
     galleryService,
     aiAnalysisService,
@@ -74,6 +76,65 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         ? 'Admin token required'
         : 'Admin access is restricted to local/private hosts. Set ADMIN_TOKEN to allow authorized remote admin requests.'
     });
+  };
+
+  const serializeResetJob = (job) => ({
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    step: job.step,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    error: job.error,
+    result: job.result
+  });
+
+  const getActiveResetJob = () => Array.from(resetJobs.values())
+    .find(job => job.status === 'queued' || job.status === 'running');
+
+  const updateResetJob = (job, updates) => {
+    Object.assign(job, updates, { updatedAt: new Date().toISOString() });
+  };
+
+  const processResetJob = async (jobId) => {
+    const job = resetJobs.get(jobId);
+    if (!job) return;
+
+    try {
+      updateResetJob(job, { status: 'running', step: 'Reading cache stats' });
+      console.log(`🔄 Starting reset job ${job.id}...`);
+
+      const cacheStats = await galleryService.imageProcessor.getCacheStats();
+
+      updateResetJob(job, { step: 'Clearing derived image cache' });
+      const clearResult = await galleryService.imageProcessor.clearAllCache();
+      if (!clearResult?.success) {
+        throw new Error(clearResult?.error || 'Failed to clear derived image cache');
+      }
+      console.log(`🧹 Reset job ${job.id}: cleared ${cacheStats?.count || 0} cached thumbnails`);
+
+      updateResetJob(job, { step: 'Rebuilding gallery catalog' });
+      await galleryService.refreshAll();
+
+      const stats = galleryService.getStats();
+      updateResetJob(job, {
+        status: 'completed',
+        step: 'Completed',
+        result: {
+          ...stats,
+          cacheCleared: cacheStats?.count || 0,
+          cacheSizeBefore: cacheStats?.totalSizeMB || '0.00'
+        }
+      });
+      console.log(`✅ Reset job ${job.id} completed`);
+    } catch (error) {
+      updateResetJob(job, {
+        status: 'failed',
+        step: 'Failed',
+        error: error.message
+      });
+      console.error(`❌ Reset job ${job.id} failed:`, error);
+    }
   };
 
   const normalizeImportedProviders = (providers = []) => {
@@ -151,6 +212,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       const photos = result.photos.map(photo => ({
         id: photo.id,
         url: `/photowall/api/display/${photo.id}`,
+        previewUrl: `/photowall/api/preview/${photo.id}`,
         originalUrl: `/photowall/api/image/${photo.id}`,
         thumbnail: `/photowall/api/thumbnail/${photo.id}`,
         blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
@@ -201,6 +263,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         data: {
           id: photo.id,
           url: `/photowall/api/display/${photo.id}`,
+          previewUrl: `/photowall/api/preview/${photo.id}`,
           originalUrl: `/photowall/api/image/${photo.id}`,
           thumbnail: `/photowall/api/thumbnail/${photo.id}`,
           blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
@@ -257,6 +320,36 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         success: false,
         error: error.message
       });
+    }
+  });
+
+  /**
+   * GET /api/preview/:id
+   * Serve 1920px progressive preview image (for slideshow warm-up)
+   */
+  router.get('/preview/:id', async (req, res) => {
+    try {
+      const photo = galleryService.getPhoto(req.params.id);
+
+      if (!photo) {
+        return res.status(404).json({ success: false, error: 'Photo not found' });
+      }
+
+      if (!await fs.pathExists(photo.originalPath)) {
+        return res.status(404).json({ success: false, error: 'Image file not found' });
+      }
+
+      const preview = await galleryService.imageProcessor.getPreviewImage(photo.originalPath);
+
+      if (!preview) {
+        return res.status(404).json({ success: false, error: 'Preview image not available' });
+      }
+
+      res.set('Cache-Control', 'public, max-age=31536000');
+      res.set('ETag', `"prev-${photo.lastModified || photo.id.replace(/[^a-zA-Z0-9]/g, '-')}"`);
+      res.sendFile(preview.path);
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
@@ -528,6 +621,15 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.post('/refresh', requireAdmin, async (req, res) => {
     try {
+      const activeResetJob = getActiveResetJob();
+      if (activeResetJob) {
+        return res.status(409).json({
+          success: false,
+          error: 'Reset cache is already running',
+          data: serializeResetJob(activeResetJob)
+        });
+      }
+
       await galleryService.refreshAll();
       const stats = galleryService.getStats();
       res.json({
@@ -545,13 +647,89 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
 
   /**
    * POST /api/reset
-   * Reset: clear all thumbnail cache and rebuild from scratch
+   * Start a background reset job: clear derived image cache and rebuild from scratch
    */
   router.post('/reset', requireAdmin, async (req, res) => {
     try {
+      const activeResetJob = getActiveResetJob();
+      if (activeResetJob) {
+        return res.status(409).json({
+          success: false,
+          error: 'Reset cache is already running',
+          data: serializeResetJob(activeResetJob)
+        });
+      }
+
+      if (galleryService.isScanning) {
+        return res.status(409).json({
+          success: false,
+          error: 'Gallery scan is already running. Try reset after the current scan finishes.'
+        });
+      }
+
+      const now = new Date().toISOString();
+      const job = {
+        id: crypto.randomUUID(),
+        type: 'reset-cache',
+        status: 'queued',
+        step: 'Queued',
+        createdAt: now,
+        updatedAt: now,
+        error: null,
+        result: null
+      };
+
+      resetJobs.set(job.id, job);
+      setTimeout(() => processResetJob(job.id), 0);
+
+      res.json({
+        success: true,
+        message: 'Reset cache job started',
+        data: serializeResetJob(job)
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/reset/jobs/:jobId
+   * Get reset cache job status
+   */
+  router.get('/reset/jobs/:jobId', requireAdmin, (req, res) => {
+    try {
+      const job = resetJobs.get(req.params.jobId);
+      if (!job) {
+        return res.status(404).json({
+          success: false,
+          error: 'Reset job not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: serializeResetJob(job)
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /api/reset-sync
+   * Legacy synchronous reset endpoint.
+   */
+  router.post('/reset-sync', requireAdmin, async (req, res) => {
+    try {
       console.log('🔄 Starting full reset...');
       
-      // Clear all thumbnail cache
+      // Clear derived image cache
       const cacheStats = await galleryService.imageProcessor.getCacheStats();
       await galleryService.imageProcessor.clearAllCache();
       console.log(`🧹 Cleared ${cacheStats.count} cached thumbnails`);
@@ -1046,6 +1224,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
           photo: {
             id: r.photo.id,
             url: `/photowall/api/display/${r.photo.id}`,
+            previewUrl: `/photowall/api/preview/${r.photo.id}`,
             originalUrl: `/photowall/api/image/${r.photo.id}`,
             thumbnail: `/photowall/api/thumbnail/${r.photo.id}`,
             title: r.photo.title,

@@ -20,6 +20,7 @@ interface AdminPanelProps {
   onRefresh: () => Promise<void>;
   onReset?: () => Promise<void>;
   isRefreshing: boolean;
+  isResetting?: boolean;
   onClose: () => void;
 }
 
@@ -32,6 +33,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   onRefresh,
   onReset,
   isRefreshing,
+  isResetting = false,
   onClose,
 }) => {
   const [showAddForm, setShowAddForm] = useState(false);
@@ -163,7 +165,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="grid grid-cols-2 sm:flex gap-2">
               <button
                 onClick={() => onRefresh()}
-                disabled={isRefreshing}
+                disabled={isRefreshing || isResetting}
                 className="px-3 py-2 sm:py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 title="Reload photos from sources"
               >
@@ -173,12 +175,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               {onReset && (
                 <button
                   onClick={() => onReset()}
-                  disabled={isRefreshing}
+                  disabled={isRefreshing || isResetting}
                   className="px-3 py-2 sm:py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 border border-red-500/30"
                   title="Clear all cache and rebuild thumbnails"
                 >
-                  <RefreshCw size={14} />
-                  Reset Cache
+                  <RefreshCw size={14} className={isResetting ? 'animate-spin' : ''} />
+                  {isResetting ? 'Resetting...' : 'Reset Cache'}
                 </button>
               )}
               <button

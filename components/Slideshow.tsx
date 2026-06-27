@@ -20,6 +20,8 @@ interface SlideshowProps {
 type IntervalOption = 3 | 5 | 8 | 10 | 15 | 30;
 type OrientationFilter = 'all' | 'landscape' | 'portrait';
 type TransitionType = 'crossfade' | 'kenburns' | 'pageflip';
+type PerformanceMode = 'auto' | 'tv' | 'quality';
+type PlaybackPressure = 'low' | 'normal' | 'high';
 
 interface KenBurnsTransform {
   startScale: number; endScale: number;
@@ -28,7 +30,7 @@ interface KenBurnsTransform {
 }
 
 const generateKenBurns = (): KenBurnsTransform => {
-  // 纯随机轻微缩放 4%-6%
+  // 纯随机轻微缩�?4%-6%
   const scaleRange = 0.04 + Math.random() * 0.02; // 4% - 6%
   
   return {
@@ -74,40 +76,61 @@ const decodeLoadedImage = async (img: HTMLImageElement) => {
   }
 };
 
+const CURRENT_IMAGE_TIMEOUT_MS = 20000;
+const PRELOAD_IMAGE_TIMEOUT_MS = 15000;
+const PAGEFLIP_READY_TIMEOUT_MS = 12000;
+const DISPLAY_FULL_PRELOAD_AHEAD = 2;
+const DISPLAY_FULL_PRELOAD_BEHIND = 2;
+const ORIGINAL_FULL_PRELOAD_AHEAD = 1;
+const ORIGINAL_FULL_PRELOAD_BEHIND = 0;
+const DISPLAY_FULL_CONCURRENCY = 2;
+const ORIGINAL_FULL_CONCURRENCY = 1;
+const MB = 1024 * 1024;
+const PERFORMANCE_BUDGET_MB: Record<PerformanceMode, number> = {
+  tv: 256,
+  auto: 512,
+  quality: 1024,
+};
+const ORIGINAL_UPGRADE_IDLE_MS = 2500;
+const FAST_NAV_WINDOW_MS = 3000;
+const LOAD_SLOW_MS = 2200;
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose }) => {
-  /* ---------- 所有 UI 状态 ---------- */
+  /* ---------- 所�?UI 状�?---------- */
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [prevIndex, setPrevIndex]       = useState<number | null>(null);
-  const [isPlaying, setIsPlaying]       = useState(false); // 默认暂停，10秒后自动开始
+  const [isPlaying, setIsPlaying]       = useState(false); // 默认暂停�?0秒后自动开�?
   const [intervalSec, setIntervalSec]   = useState<IntervalOption>(10);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [imageLoaded, setImageLoaded]   = useState(false);
   const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
-  const [thumbDisplayReady, setThumbDisplayReady] = useState(false); // ★ 缩略图显示满足最小时间
-  const thumbLoadTimeRef = useRef<number>(0); // ★ 记录缩略图加载完成时间
-  const [nextImageReady, setNextImageReady] = useState(false); // ★ 下一张高清图是否准备好（Page Flip 模式用）
+  const [thumbDisplayReady, setThumbDisplayReady] = useState(false); // �?缩略图显示满足最小时�?
+  const thumbLoadTimeRef = useRef<number>(0); // �?记录缩略图加载完成时�?
+  const [nextImageReady, setNextImageReady] = useState(false); // �?下一张高清图是否准备好（Page Flip 模式用）
   const [orientationFilter, setOrientationFilter] = useState<OrientationFilter>('all');
   const [photoOrientations, setPhotoOrientations] = useState<Record<string, 'landscape' | 'portrait' | 'square'>>({});
   const [orientationsLoaded, setOrientationsLoaded] = useState(false);
   const [isLoading, setIsLoading]       = useState(true);
-  const [displayedUrl, setDisplayedUrl] = useState(''); // ★ 加载完成后才放上 img 标签
+  const [displayedUrl, setDisplayedUrl] = useState(''); // �?加载完成后才放上 img 标签
   const [transition, setTransition]     = useState<TransitionType>('kenburns');
+  const [performanceMode, setPerformanceMode] = useState<PerformanceMode>('auto');
+  const [lastImageLoadMs, setLastImageLoadMs] = useState(0);
   const [idleSeconds, setIdleSeconds]   = useState(0); // 空闲计时
   const [isRandomOrder, setIsRandomOrder] = useState(false); // 随机播放/顺序播放
   const [imageQuality, setImageQuality] = useState<'display' | 'original'>('display'); // 画质模式
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]); // 随机排序后的索引
   const [particleLevel, setParticleLevel] = useState<number>(5); // 粒子数量级别 1-10
-  const [photoAnalysis, setPhotoAnalysis] = useState<AIAnalysisResult | null>(null); // 当前照片的分析结果
+  const [photoAnalysis, setPhotoAnalysis] = useState<AIAnalysisResult | null>(null); // 当前照片的分析结�?
   
-  /* ---------- Page Flip 状态 ---------- */
+  /* ---------- Page Flip 状�?---------- */
   const [flipDirection, setFlipDirection] = useState<FlipDirection>('right');
   const [isFlipping, setIsFlipping]       = useState(false);
 
-  /* ---------- BGM 状态 ---------- */
+  /* ---------- BGM 状�?---------- */
   const [bgmList, setBgmList]           = useState<{id: string, filename: string, url: string}[]>([]);
   const [currentBgmIndex, setCurrentBgmIndex] = useState(0);
   const [isMuted, setIsMuted]           = useState(false); // 默认播放音乐
@@ -121,33 +144,44 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   const prevIndexTimer   = useRef<ReturnType<typeof setTimeout>>();
   const kenBurnsCache    = useRef<Map<number, KenBurnsTransform>>(new Map());
   const audioRef         = useRef<HTMLAudioElement | null>(null);
+  const manualNavigationTimes = useRef<number[]>([]);
 
   // ================================================================
-  // ★ 分级图片缓存系统
-  // L1: 缩略图 - 常驻内存，数量多但体积小
-  // L2: 预览图 (800px) - LRU 缓存，中等数量
+  // �?分级图片缓存系统
+  // L1: 缩略�?- 常驻内存，数量多但体积小
+  // L2: 预览�?(800px) - LRU 缓存，中等数�?
   // L3: 高清原图 - 严格限制数量，用完即释放
   // ================================================================
   
-  // L1: 缩略图缓存 - 常驻内存，可存 500+ 张
+  // L1: 缩略图缓�?- 常驻内存，可�?500+ �?
   const THUMB_CACHE_SIZE = 500;
   const thumbCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const thumbUrls = useRef<Set<string>>(new Set());
   
-  // L2: 预览图缓存 (800px) - LRU，最多 50 张
+  // L2: 预览图缓�?(800px) - LRU，最�?50 �?
   const PREVIEW_CACHE_SIZE = 50;
   const previewCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const previewUrls = useRef<Set<string>>(new Set());
   
-  // L3: 高清原图缓存 - 严格限制最多 5 张（当前显示 + 预加载）
+  // L3: 高清原图缓存 - 严格限制最�?5 张（当前显示 + 预加载）
   const FULL_CACHE_SIZE = 5;
   const fullCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const fullUrls = useRef<Set<string>>(new Set());
+  const fullCacheBytes = useRef<Map<string, number>>(new Map());
+  const fullCacheTotalBytes = useRef(0);
   
   // 统一的预加载 URL 集合（用于快速检查）
   const preloadedUrls = useRef<Set<string>>(new Set());
 
-  // ★ 添加缩略图到 L1 缓存
+  const estimateImageBytes = useCallback((img: HTMLImageElement) => {
+    const width = img.naturalWidth || img.width || 3840;
+    const height = img.naturalHeight || img.height || 2160;
+    return Math.max(width * height * 4, 1);
+  }, []);
+
+  const fullCacheBudgetBytes = PERFORMANCE_BUDGET_MB[performanceMode] * MB;
+
+  // �?添加缩略图到 L1 缓存
   const addToThumbCache = useCallback((key: string, img: HTMLImageElement) => {
     if (thumbCache.current.has(key)) {
       thumbCache.current.delete(key);
@@ -165,7 +199,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     preloadedUrls.current.add(key);
   }, []);
 
-  // ★ 添加预览图到 L2 缓存
+  // �?添加预览图到 L2 缓存
   const addToPreviewCache = useCallback((key: string, img: HTMLImageElement) => {
     if (previewCache.current.has(key)) {
       previewCache.current.delete(key);
@@ -183,35 +217,48 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     preloadedUrls.current.add(key);
   }, []);
 
-  // ★ 添加高清图到 L3 缓存（严格限制）
+  // �?添加高清图到 L3 缓存（严格限制）
   const addToFullCache = useCallback((key: string, img: HTMLImageElement) => {
     if (fullCache.current.has(key)) {
+      fullCacheTotalBytes.current -= fullCacheBytes.current.get(key) || 0;
+      fullCacheBytes.current.delete(key);
       fullCache.current.delete(key);
     }
-    while (fullCache.current.size >= FULL_CACHE_SIZE) {
+    const imageBytes = estimateImageBytes(img);
+    while (
+      fullCache.current.size >= FULL_CACHE_SIZE ||
+      (fullCacheTotalBytes.current + imageBytes > fullCacheBudgetBytes && fullCache.current.size > 0)
+    ) {
       const firstKey = fullCache.current.keys().next().value;
       if (firstKey) {
         fullCache.current.delete(firstKey);
         fullUrls.current.delete(firstKey);
         preloadedUrls.current.delete(firstKey);
+        fullCacheTotalBytes.current -= fullCacheBytes.current.get(firstKey) || 0;
+        fullCacheBytes.current.delete(firstKey);
       }
     }
     fullCache.current.set(key, img);
+    fullCacheBytes.current.set(key, imageBytes);
+    fullCacheTotalBytes.current += imageBytes;
     fullUrls.current.add(key);
     preloadedUrls.current.add(key);
-  }, []);
+  }, [estimateImageBytes, fullCacheBudgetBytes]);
 
-  // ★ 从缓存获取图片（按优先级）
+  // �?从缓存获取图片（按优先级�?
   const getFromCache = useCallback((key: string): HTMLImageElement | undefined => {
-    // 优先高清图
+    // 优先高清�?
     if (fullCache.current.has(key)) {
       const img = fullCache.current.get(key)!;
       // 更新 LRU 顺序
       fullCache.current.delete(key);
+      const bytes = fullCacheBytes.current.get(key) || 0;
+      fullCacheBytes.current.delete(key);
       fullCache.current.set(key, img);
+      fullCacheBytes.current.set(key, bytes);
       return img;
     }
-    // 其次预览图
+    // 其次预览�?
     if (previewCache.current.has(key)) {
       const img = previewCache.current.get(key)!;
       previewCache.current.delete(key);
@@ -228,7 +275,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     return undefined;
   }, []);
 
-  // ★ 启动时清空所有缓存
+  // �?启动时清空所有缓�?
   useEffect(() => {
     thumbCache.current.clear();
     thumbUrls.current.clear();
@@ -236,18 +283,20 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     previewUrls.current.clear();
     fullCache.current.clear();
     fullUrls.current.clear();
+    fullCacheBytes.current.clear();
+    fullCacheTotalBytes.current = 0;
     preloadedUrls.current.clear();
     kenBurnsCache.current.clear();
   }, []);
 
-  // ★ 定时清理：每 30 分钟清理一次
+  // �?定时清理：每 30 分钟清理一�?
   useEffect(() => {
     const CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 分钟
     
     const interval = setInterval(() => {
       const beforeSize = preloadedUrls.current.size;
       
-      // 清理缩略图：保留最近 300 张
+      // 清理缩略图：保留最�?300 �?
       if (thumbCache.current.size > 300) {
         const entries = Array.from(thumbCache.current.entries());
         const toDelete = entries.slice(0, entries.length - 300);
@@ -258,7 +307,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         });
       }
       
-      // 清理预览图：保留最近 30 张
+      // 清理预览图：保留最�?30 �?
       if (previewCache.current.size > 30) {
         const entries = Array.from(previewCache.current.entries());
         const toDelete = entries.slice(0, entries.length - 30);
@@ -269,18 +318,18 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         });
       }
       
-      // 高清图保持严格限制，不额外清理
+      // 高清图保持严格限制，不额外清�?
       
       const afterSize = preloadedUrls.current.size;
       if (beforeSize !== afterSize) {
-        console.log(`🧹 Cache cleanup: ${beforeSize} → ${afterSize} items (thumb=${thumbCache.current.size}, preview=${previewCache.current.size}, full=${fullCache.current.size})`);
+        console.log(`🧹 Cache cleanup: ${beforeSize} �?${afterSize} items (thumb=${thumbCache.current.size}, preview=${previewCache.current.size}, full=${fullCache.current.size})`);
       }
     }, CLEANUP_INTERVAL);
     
     return () => clearInterval(interval);
   }, []);
 
-  // ★ 旧的 LRU 缓存管理（兼容代码，逐步迁移）
+  // �?旧的 LRU 缓存管理（兼容代码，逐步迁移�?
   const MAX_CACHE_SIZE = 100;
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const addToImageCache = useCallback((key: string, img: HTMLImageElement) => {
@@ -297,7 +346,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     }
   }, [addToThumbCache, addToPreviewCache, addToFullCache]);
 
-  // ★ 核心：用一个 ref 保存自动播放需要读取的所有"最新值"
+  // �?核心：用一�?ref 保存自动播放需要读取的所�?最新�?
   // 这样定时器回调永远读到最新状态，不需要重建定时器
   const playStateRef = useRef({
     isPlaying: true,
@@ -317,12 +366,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     });
   }, [photos, orientationFilter, photoOrientations, orientationsLoaded]);
 
-  // 同步到 ref
+  // 同步�?ref
   useEffect(() => {
     playStateRef.current.filteredLength = filteredPhotos.length;
   }, [filteredPhotos.length]);
   
-  // 生成随机播放列表（预加载整个播放顺序）
+  // 生成随机播放列表（预加载整个播放顺序�?
   const generateShuffledIndices = useCallback(() => {
     const indices = Array.from({ length: filteredPhotos.length }, (_, i) => i);
     // Fisher-Yates 洗牌算法
@@ -334,17 +383,17 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     console.log('🎲 Generated random playlist:', indices.slice(0, 10), '...');
   }, [filteredPhotos.length]);
   
-  // 切换随机/顺序播放时重新生成列表
+  // 切换随机/顺序播放时重新生成列�?
   useEffect(() => {
     if (isRandomOrder) {
       generateShuffledIndices();
     }
   }, [isRandomOrder, generateShuffledIndices]);
   
-  // ★ 智能预加载：分级策略，严格限制高清图数量
-  // L1: 缩略图 - 预加载前后 10 张
-  // L2: 预览图 - 预加载前后 3 张
-  // L3: 高清原图 - 严格限制最多 5 张（当前 + 前后各 2 张）
+  // �?智能预加载：分级策略，严格限制高清图数量
+  // L1: 缩略�?- 预加载前�?10 �?
+  // L2: 预览�?- 预加载前�?3 �?
+  // L3: 高清原图 - 严格限制最�?5 张（当前 + 前后�?2 张）
   const PRELOAD_THUMB_AHEAD = 10;  // 缩略图预加载范围
   const PRELOAD_PREVIEW_AHEAD = 3; // 预览图预加载范围
   const MAX_FULL_PRELOAD = 5;      // 高清图最大预加载数量
@@ -364,16 +413,54 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
   const qualityRef = useRef(imageQuality);
   useEffect(() => { qualityRef.current = imageQuality; }, [imageQuality]);
+  const performanceModeRef = useRef(performanceMode);
+  useEffect(() => { performanceModeRef.current = performanceMode; }, [performanceMode]);
+  const lastImageLoadMsRef = useRef(lastImageLoadMs);
+  useEffect(() => { lastImageLoadMsRef.current = lastImageLoadMs; }, [lastImageLoadMs]);
+
+  const getPlaybackPressure = useCallback((): PlaybackPressure => {
+    const mode = performanceModeRef.current;
+    if (mode === 'tv') return 'high';
+    if (mode === 'quality') return 'low';
+
+    const now = Date.now();
+    manualNavigationTimes.current = manualNavigationTimes.current.filter((time) => now - time <= FAST_NAV_WINDOW_MS);
+    const fastManualNavigation = manualNavigationTimes.current.length >= 2;
+    const shortInterval = playStateRef.current.intervalSec <= 5;
+    const slowRecentLoad = lastImageLoadMsRef.current >= LOAD_SLOW_MS;
+    const cachePressure = fullCacheTotalBytes.current > fullCacheBudgetBytes * 0.85;
+
+    if (fastManualNavigation || shortInterval || slowRecentLoad || cachePressure) return 'high';
+    if (lastImageLoadMsRef.current > 0 || fullCacheTotalBytes.current > fullCacheBudgetBytes * 0.6) return 'normal';
+    return 'low';
+  }, [fullCacheBudgetBytes]);
   
   // 跟踪正在加载的高清图数量
   const loadingFullCount = useRef(0);
   const loadingFullUrls = useRef<Set<string>>(new Set());
   const fullPreloadQueue = useRef<string[]>([]);
 
+  const finishFullLoading = useCallback((key: string) => {
+    loadingFullUrls.current.delete(key);
+    loadingFullCount.current = Math.max(0, loadingFullCount.current - 1);
+  }, []);
+
+  useEffect(() => {
+    loadingFullUrls.current.clear();
+    loadingFullCount.current = 0;
+    fullPreloadQueue.current = [];
+    setNextImageReady(false);
+  }, [imageQuality, performanceMode]);
+
   const preloadRange = useCallback((centerIdx: number, list: Photo[]) => {
     const len = list.length;
     if (len <= 1) return;
-    const quality = qualityRef.current;
+    const pressure = getPlaybackPressure();
+    const thumbAhead = pressure === 'high' ? 8 : 12;
+    const previewAhead = pressure === 'high' ? 2 : pressure === 'normal' ? 3 : 4;
+    const fullAhead = pressure === 'high' ? 1 : pressure === 'normal' ? 2 : 3;
+    const fullBehind = pressure === 'high' ? 0 : pressure === 'normal' ? 1 : 2;
+    const fullConcurrency = pressure === 'high' ? 1 : 2;
     const collectPlaybackIndices = (ahead: number, behind: number) => {
       const indices: number[] = [];
       const seen = new Set<number>();
@@ -400,13 +487,12 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return indices;
     };
 
-    // ========== L1: 缩略图预加载（前后 10 张）==========
-    for (const idx of collectPlaybackIndices(PRELOAD_THUMB_AHEAD, 2)) {
+    // ========== L1: 缩略图预加载（前�?10 张）==========
+    for (const idx of collectPlaybackIndices(thumbAhead, 2)) {
       const photo = list[idx];
       if (!photo || !photo.thumbnail) continue;
       
-      const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
-      const thumbKey = `thumb:${photoUrl}`;
+      const thumbKey = `thumb:${photo.thumbnail}`;
       
       if (!thumbUrls.current.has(thumbKey)) {
         const tImg = new window.Image();
@@ -416,75 +502,90 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }
     }
 
-    // ========== L2: 预览图预加载（前后 3 张）==========
-    for (const idx of collectPlaybackIndices(PRELOAD_PREVIEW_AHEAD, 1)) {
+    // ========== L2: 预览图预加载（前�?3 张）==========
+    for (const idx of collectPlaybackIndices(previewAhead, 1)) {
       const photo = list[idx];
       if (!photo) continue;
       
-      const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
-      const previewKey = `preview:${photoUrl}`;
+      const previewUrl = photo.previewUrl || photo.thumbnail;
+      const previewKey = `preview:${previewUrl}`;
       
       // 如果后端支持预览图尺寸，这里可以加载 800px 版本
       // 目前先用缩略图作为预览图
-      if (!previewUrls.current.has(previewKey) && photo.thumbnail) {
+      if (!previewUrls.current.has(previewKey) && previewUrl) {
         const pImg = new window.Image();
         configureImageLoad(pImg, 'low');
-        pImg.src = photo.thumbnail;
+        pImg.src = previewUrl;
         pImg.onload = () => addToPreviewCache(previewKey, pImg);
       }
     }
 
     // ========== L3: 高清原图预加载（严格限制 5 张）==========
     // 计算需要预加载的高清图索引
-    const fullIndices = collectPlaybackIndices(2, 2);
+    const fullIndices = collectPlaybackIndices(fullAhead, fullBehind);
     
-    // 限制高清图缓存大小
+    // 限制高清图缓存大�?
     while (fullCache.current.size >= MAX_FULL_PRELOAD) {
       const firstKey = fullCache.current.keys().next().value;
       if (firstKey) {
         fullCache.current.delete(firstKey);
         fullUrls.current.delete(firstKey);
         preloadedUrls.current.delete(firstKey);
+        fullCacheTotalBytes.current -= fullCacheBytes.current.get(firstKey) || 0;
+        fullCacheBytes.current.delete(firstKey);
       }
     }
     
-    // 加载高清图（限制并发）
+    // Load display images with bounded concurrency.
     for (const idx of fullIndices) {
-      if (loadingFullCount.current >= 2) break; // 最多同时加载 2 张高清图
+      if (loadingFullCount.current >= fullConcurrency) break;
       
       const photo = list[idx];
       if (!photo) continue;
       
-      const photoUrl = quality === 'original' && photo.originalUrl ? photo.originalUrl : photo.url;
+      const photoUrl = photo.url;
       const fullKey = `full:${photoUrl}`;
       
       if (!fullUrls.current.has(fullKey) && !loadingFullUrls.current.has(fullKey)) {
         loadingFullCount.current++;
         loadingFullUrls.current.add(fullKey);
         const fImg = new window.Image();
+        let active = true;
+        let finished = false;
+        let timeoutId: number;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          window.clearTimeout(timeoutId);
+          finishFullLoading(fullKey);
+        };
+        timeoutId = window.setTimeout(() => {
+          active = false;
+          finish();
+        }, PRELOAD_IMAGE_TIMEOUT_MS);
         configureImageLoad(fImg, 'low');
-        fImg.src = photoUrl;
         fImg.onload = async () => {
           await decodeLoadedImage(fImg);
+          if (!active) return;
           addToFullCache(fullKey, fImg);
-          loadingFullCount.current--;
-          loadingFullUrls.current.delete(fullKey);
+          finish();
         };
         fImg.onerror = () => {
-          loadingFullCount.current--;
-          loadingFullUrls.current.delete(fullKey);
+          active = false;
+          finish();
         };
+        fImg.src = photoUrl;
       }
     }
     
     console.log(`📦 Preload: thumb=${thumbCache.current.size}, preview=${previewCache.current.size}, full=${fullCache.current.size} (loading: ${loadingFullCount.current})`);
-  }, [addToThumbCache, addToPreviewCache, addToFullCache, getPlaybackIndex]);
+  }, [addToThumbCache, addToPreviewCache, addToFullCache, finishFullLoading, getPlaybackIndex, getPlaybackPressure]);
 
   useEffect(() => { playStateRef.current.isPlaying = isPlaying; }, [isPlaying]);
   useEffect(() => { playStateRef.current.intervalSec = intervalSec; }, [intervalSec]);
   useEffect(() => { playStateRef.current.isLoading = isLoading; }, [isLoading]);
 
-  /* ---------- BGM 加载和控制 ---------- */
+  /* ---------- BGM 加载和控�?---------- */
   // 加载 BGM 列表
   useEffect(() => {
     const loadBgmList = async () => {
@@ -505,15 +606,15 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     loadBgmList();
   }, []);
 
-  // 音频播放控制（与幻灯片播放状态同步，支持暂停续播）
+  // 音频播放控制（与幻灯片播放状态同步，支持暂停续播�?
   useEffect(() => {
     if (!bgmLoaded || bgmList.length === 0) return;
 
-    // 创建或更新音频元素
+    // 创建或更新音频元�?
     if (!audioRef.current) {
       audioRef.current = new Audio();
       audioRef.current.volume = 0.5;
-      // 恢复上次保存的音量
+      // 恢复上次保存的音�?
       const savedVolume = localStorage.getItem('sg_bgm_volume');
       if (savedVolume) audioRef.current.volume = parseFloat(savedVolume);
     }
@@ -521,19 +622,19 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     const audio = audioRef.current;
     const currentBgm = bgmList[currentBgmIndex];
     
-    // 只在需要切换歌曲时才更新 src（避免暂停/播放时重置进度）
+    // 只在需要切换歌曲时才更�?src（避免暂�?播放时重置进度）
     const expectedSrc = currentBgm.url;
     const currentSrc = audio.src.replace(window.location.origin, '');
     
     if (!audio.src || currentSrc !== expectedSrc) {
-      // 保存当前播放进度（如果是同一首歌）
+      // 保存当前播放进度（如果是同一首歌�?
       const wasPlaying = !audio.paused;
       const currentTime = audio.currentTime;
       
       audio.src = currentBgm.url;
       audio.load();
       
-      // 如果是切歌，从头播放；如果是恢复播放，保持进度
+      // 如果是切歌，从头播放；如果是恢复播放，保持进�?
       if (wasPlaying && currentTime > 0 && currentSrc === expectedSrc) {
         audio.currentTime = currentTime;
       }
@@ -546,7 +647,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       // 背景音模式：音乐不受幻灯片暂停影响，始终播放
       audio.play().catch(err => console.log('Audio play failed:', err));
     } else {
-      // 伴随模式：音乐与幻灯片同步
+      // 伴随模式：音乐与幻灯片同�?
       if (isPlaying) {
         audio.play().catch(err => console.log('Audio play failed:', err));
       } else {
@@ -554,7 +655,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }
     }
 
-    // 当前歌曲结束，播放下一首
+    // 当前歌曲结束，播放下一�?
     const handleEnded = () => {
       setCurrentBgmIndex((prev) => (prev + 1) % bgmList.length);
     };
@@ -587,7 +688,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     };
   }, []);
 
-  // 切换 filter 时重置索引
+  // 切换 filter 时重置索�?
   const prevFilterRef = useRef(orientationFilter);
   useEffect(() => {
     if (prevFilterRef.current !== orientationFilter) {
@@ -604,10 +705,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
   // 根据画质设置选择 URL
   const effectiveUrl = currentPhoto
-    ? (imageQuality === 'original' && currentPhoto.originalUrl ? currentPhoto.originalUrl : currentPhoto.url)
+    ? currentPhoto.url
     : '';
 
-  // 加载当前照片的分析结果
+  // 加载当前照片的分析结�?
   useEffect(() => {
     if (!currentPhoto) {
       setPhotoAnalysis(null);
@@ -640,14 +741,20 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   };
 
   /* ================================================================ */
-  /*  ★ 核心导航：goNext / goPrev                                     */
-  /*  完全不依赖任何 state —— 全部通过 ref 或 setState(fn) 读取        */
+  /*  �?核心导航：goNext / goPrev                                     */
+  /*  完全不依赖任�?state —�?全部通过 ref �?setState(fn) 读取        */
   /* ================================================================ */
-  const navigate = useCallback((direction: 1 | -1) => {
+  const navigate = useCallback((direction: 1 | -1, reason: 'manual' | 'auto' = 'manual') => {
     const { isLoading: loading, filteredLength: len } = playStateRef.current;
     if (loading || len <= 1) return;
 
-    // 设置翻页方向（用于 pageflip 效果）
+    if (reason === 'manual') {
+      const now = Date.now();
+      manualNavigationTimes.current = [...manualNavigationTimes.current, now]
+        .filter((time) => now - time <= FAST_NAV_WINDOW_MS);
+    }
+
+    // 设置翻页方向（用�?pageflip 效果�?
     setFlipDirection(direction === 1 ? 'right' : 'left');
     setIsFlipping(true);
 
@@ -655,7 +762,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       setPrevIndex(prev);
       
       if (isRandomOrder && shuffledIndices.length > 0) {
-        // 随机播放模式：使用洗牌后的索引
+        // 随机播放模式：使用洗牌后的索�?
         const currentShuffledIdx = shuffledIndices.indexOf(prev);
         const nextShuffledIdx = (currentShuffledIdx + direction + len) % len;
         return shuffledIndices[nextShuffledIdx];
@@ -665,18 +772,18 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       }
     });
     setImageLoaded(false);
-    // ★ 不再清空 displayedUrl，保持旧图显示直到新图加载完成
+    // �?不再清空 displayedUrl，保持旧图显示直到新图加载完�?
 
-    // 清除上一次的 prevIndex 清理定时器
+    // 清除上一次的 prevIndex 清理定时�?
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
     prevIndexTimer.current = setTimeout(() => {
       setPrevIndex(null);
       setIsFlipping(false);
     }, TRANSITION_MS + 200);
-  }, [isRandomOrder, shuffledIndices]); // 依赖随机播放状态
+  }, [isRandomOrder, shuffledIndices]); // 依赖随机播放状�?
 
   /* ================================================================ */
-  /*  ★ 自动播放：ProgressBar 组件自己管理 elapsed 和 progress         */
+  /*  �?自动播放：ProgressBar 组件自己管理 elapsed �?progress         */
   /*  Page Flip 模式下需等待下一张高清图加载完成才能切换              */
   /* ================================================================ */
   const handleProgressComplete = useCallback(() => {
@@ -686,28 +793,30 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       setIsPlaying(false);
       return;
     }
-    navigate(1);
+    navigate(1, 'auto');
   }, [navigate, transition, nextImageReady]);
 
   /* ================================================================ */
-  /*  ★ 图片加载：真正异步 + 状态驱动 + 并行加载                        */
+  /*  �?图片加载：真正异�?+ 状态驱�?+ 并行加载                        */
   /* ================================================================ */
   useEffect(() => {
     if (!currentPhoto || !effectiveUrl) return;
     let cancelled = false;
+    let currentFullTimeout: number | undefined;
+    const loadStartedAt = Date.now();
 
-    // ★ 切换照片时：重置加载状态，但保持旧图显示
+    // �?切换照片时：重置加载状态，但保持旧图显�?
     setImageLoaded(false);
     setThumbnailLoaded(false);
 
     const thumbKey = `thumb:${effectiveUrl}`;
     const fullKey = `full:${effectiveUrl}`;
 
-    // 重置最小显示时间状态
+    // 重置最小显示时间状�?
     setThumbDisplayReady(false);
     thumbLoadTimeRef.current = 0;
 
-    // ① 两个都已缓存 → 瞬间显示
+    // �?两个都已缓存 �?瞬间显示
     if (preloadedUrls.current.has(thumbKey) && preloadedUrls.current.has(fullKey)) {
       setThumbnailLoaded(true);
       setDisplayedUrl(effectiveUrl);
@@ -715,9 +824,9 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return;
     }
 
-    // ② 并行加载缩略图和原图（真正的异步）
+    // �?并行加载缩略图和原图（真正的异步�?
     
-    // 加载缩略图（独立，不阻塞）- 使用 L1 缓存
+    // 加载缩略图（独立，不阻塞�? 使用 L1 缓存
     if (currentPhoto.thumbnail && !thumbUrls.current.has(thumbKey)) {
       const tImg = new window.Image();
       configureImageLoad(tImg, 'low');
@@ -729,17 +838,17 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         thumbLoadTimeRef.current = Date.now();
       };
       tImg.onerror = () => {
-        // 缩略图失败，直接标记为已加载（会跳过粒子显示）
+        // 缩略图失败，直接标记为已加载（会跳过粒子显示�?
         if (!cancelled) setThumbnailLoaded(true);
       };
     } else {
-      // 没有缩略图或已缓存
+      // 没有缩略图或已缓�?
       setThumbnailLoaded(true);
     }
 
-    // ★ 等待最小显示时间的辅助函数
+    // �?等待最小显示时间的辅助函数
     const waitForMinDisplay = (callback: () => void) => {
-      const MIN_DISPLAY_MS = 3000; // 最小 3 秒
+      const MIN_DISPLAY_MS = 3000; // 最�?3 �?
       const elapsed = Date.now() - thumbLoadTimeRef.current;
       const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
       
@@ -752,13 +861,20 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     if (!fullUrls.current.has(fullKey)) {
       const fImg = new window.Image();
       configureImageLoad(fImg, 'high');
-      fImg.src = effectiveUrl;
+      currentFullTimeout = window.setTimeout(() => {
+        if (cancelled) return;
+        cancelled = true;
+        console.warn('Image load timed out, skipping:', currentPhoto.title);
+        navigate(1);
+      }, CURRENT_IMAGE_TIMEOUT_MS);
       fImg.onload = async () => {
         if (cancelled) return;
         await decodeLoadedImage(fImg);
         if (cancelled) return;
+        if (currentFullTimeout) window.clearTimeout(currentFullTimeout);
+        setLastImageLoadMs(Date.now() - loadStartedAt);
         addToFullCache(fullKey, fImg);
-        // ★ 原图加载完成，但等待最小显示时间
+        // �?原图加载完成，但等待最小显示时�?
         waitForMinDisplay(() => {
           if (!cancelled) {
             setDisplayedUrl(effectiveUrl);
@@ -768,13 +884,16 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       };
       fImg.onerror = () => {
         if (cancelled) return;
+        if (currentFullTimeout) window.clearTimeout(currentFullTimeout);
         console.warn('⏭️ Image load failed, skipping:', currentPhoto.title);
         navigate(1);
       };
+      fImg.src = effectiveUrl;
     } else {
-      // 原图已缓存，更新 LRU 顺序，然后等待最小显示时间
+      // 原图已缓存，更新 LRU 顺序，然后等待最小显示时�?
       const cachedImg = fullCache.current.get(fullKey);
       if (cachedImg) addToFullCache(fullKey, cachedImg);
+      setLastImageLoadMs(0);
       waitForMinDisplay(() => {
         if (!cancelled) {
           setDisplayedUrl(effectiveUrl);
@@ -783,17 +902,108 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       });
     }
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (currentFullTimeout) window.clearTimeout(currentFullTimeout);
+    };
   }, [safeIndex, effectiveUrl, currentPhoto?.thumbnail, addToThumbCache, addToFullCache]);
 
-  // ⑤ 预加载后续照片（当前照片有任何一张加载到位就开始）
+  useEffect(() => {
+    if (!currentPhoto || imageLoaded) return;
+    const previewUrl = currentPhoto.previewUrl || currentPhoto.thumbnail;
+    if (!previewUrl) return;
+
+    const previewKey = `preview:${previewUrl}`;
+    let cancelled = false;
+
+    const cachedPreview = getFromCache(previewKey);
+    if (cachedPreview) {
+      setDisplayedUrl(previewUrl);
+      setImageLoaded(true);
+      return;
+    }
+
+    const pImg = new window.Image();
+    configureImageLoad(pImg, 'high');
+    pImg.onload = async () => {
+      await decodeLoadedImage(pImg);
+      if (cancelled) return;
+      addToPreviewCache(previewKey, pImg);
+      setDisplayedUrl(previewUrl);
+      setImageLoaded(true);
+    };
+    pImg.onerror = () => {
+      if (!cancelled && currentPhoto.thumbnail) {
+        setDisplayedUrl(currentPhoto.thumbnail);
+        setImageLoaded(true);
+      }
+    };
+    pImg.src = previewUrl;
+
+    return () => {
+      cancelled = true;
+      pImg.onload = null;
+      pImg.onerror = null;
+      pImg.src = '';
+    };
+  }, [currentPhoto?.id, currentPhoto?.previewUrl, currentPhoto?.thumbnail, imageLoaded, addToPreviewCache, getFromCache]);
+
+  useEffect(() => {
+    if (!currentPhoto || !imageLoaded || imageQuality !== 'original' || !currentPhoto.originalUrl) return;
+    if (performanceMode === 'tv' || getPlaybackPressure() === 'high') return;
+    if (displayedUrl === currentPhoto.originalUrl) return;
+
+    const originalUrl = currentPhoto.originalUrl;
+    const originalKey = `full:${originalUrl}`;
+    let cancelled = false;
+    let timeoutId: number;
+
+    const cachedOriginal = getFromCache(originalKey);
+    if (cachedOriginal) {
+      setDisplayedUrl(originalUrl);
+      return;
+    }
+
+    timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      const img = new window.Image();
+      configureImageLoad(img, 'low');
+      img.onload = async () => {
+        await decodeLoadedImage(img);
+        if (cancelled) return;
+        addToFullCache(originalKey, img);
+        setDisplayedUrl(originalUrl);
+      };
+      img.onerror = () => {
+        // Keep the current display-quality image.
+      };
+      img.src = originalUrl;
+    }, ORIGINAL_UPGRADE_IDLE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    currentPhoto?.id,
+    currentPhoto?.originalUrl,
+    displayedUrl,
+    imageLoaded,
+    imageQuality,
+    performanceMode,
+    addToFullCache,
+    getFromCache,
+    getPlaybackPressure
+  ]);
+
+  // �?预加载后续照片（当前照片有任何一张加载到位就开始）
   useEffect(() => {
     if (imageLoaded || thumbnailLoaded) {
       preloadRange(safeIndex, filteredPhotos);
     }
   }, [imageLoaded, thumbnailLoaded, safeIndex, filteredPhotos, preloadRange]);
 
-  // ⑥ Page Flip 模式：预加载下一张高清图，加载完成后恢复播放
+  // �?Page Flip 模式：预加载下一张高清图，加载完成后恢复播放
   useEffect(() => {
     if (transition !== 'pageflip') {
       setNextImageReady(false);
@@ -814,10 +1024,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return;
     }
 
-    const nextUrl = imageQuality === 'original' && nextPhoto.originalUrl 
-      ? nextPhoto.originalUrl 
-      : nextPhoto.url;
+    const nextUrl = nextPhoto.url;
+    const nextPreviewUrl = nextPhoto.previewUrl || nextPhoto.thumbnail;
     const fullKey = `full:${nextUrl}`;
+    const previewKey = `preview:${nextPreviewUrl}`;
 
     // 检查是否已缓存
     if (fullUrls.current.has(fullKey)) {
@@ -832,11 +1042,26 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
       return;
     }
 
+    if (previewUrls.current.has(previewKey)) {
+      setNextImageReady(true);
+      if (!isPlaying) {
+        setIsPlaying(true);
+      }
+      return;
+    }
+
     if (loadingFullUrls.current.has(fullKey)) {
       setNextImageReady(false);
-      const waitForExistingLoad = window.setInterval(() => {
+      let waitForExistingLoad: number;
+      const waitTimeout = window.setTimeout(() => {
+        window.clearInterval(waitForExistingLoad);
+        setNextImageReady(true);
+        setIsPlaying(true);
+      }, PAGEFLIP_READY_TIMEOUT_MS);
+      waitForExistingLoad = window.setInterval(() => {
         if (fullUrls.current.has(fullKey)) {
           window.clearInterval(waitForExistingLoad);
+          window.clearTimeout(waitTimeout);
           setNextImageReady(true);
           setIsPlaying(true);
           return;
@@ -844,31 +1069,48 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
         if (!loadingFullUrls.current.has(fullKey)) {
           window.clearInterval(waitForExistingLoad);
+          window.clearTimeout(waitTimeout);
           setNextImageReady(true);
           setIsPlaying(true);
         }
       }, 120);
 
-      return () => window.clearInterval(waitForExistingLoad);
+      return () => {
+        window.clearInterval(waitForExistingLoad);
+        window.clearTimeout(waitTimeout);
+      };
     }
 
-    // 重置状态，开始加载
+    // 重置状态，开始加�?
     setNextImageReady(false);
 
     // 预加载下一张高清图
     const fImg = new window.Image();
     configureImageLoad(fImg, 'high');
     loadingFullUrls.current.add(fullKey);
-    fImg.src = nextUrl;
+    let pageflipLoadActive = true;
+    const pageflipTimeout = window.setTimeout(() => {
+      pageflipLoadActive = false;
+      loadingFullUrls.current.delete(fullKey);
+      setNextImageReady(true);
+      setIsPlaying(true);
+    }, PAGEFLIP_READY_TIMEOUT_MS);
+    const pageflipStart = window.setTimeout(() => {
+      if (pageflipLoadActive) fImg.src = nextUrl;
+    }, 0);
     fImg.onload = async () => {
       await decodeLoadedImage(fImg);
+      if (!pageflipLoadActive) return;
+      window.clearTimeout(pageflipTimeout);
       addToFullCache(fullKey, fImg);
       loadingFullUrls.current.delete(fullKey);
       setNextImageReady(true);
-      // 加载完成，恢复播放
+      // 加载完成，恢复播�?
       setIsPlaying(true);
     };
     fImg.onerror = () => {
+      pageflipLoadActive = false;
+      window.clearTimeout(pageflipTimeout);
       loadingFullUrls.current.delete(fullKey);
       // 加载失败也标记为准备好，避免卡住
       setNextImageReady(true);
@@ -876,7 +1118,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     };
 
     return () => {
-      // 清理，但让图片继续加载（不 abort）
+      // 清理，但让图片继续加载（�?abort�?
+      pageflipLoadActive = false;
+      window.clearTimeout(pageflipStart);
+      window.clearTimeout(pageflipTimeout);
     };
   }, [safeIndex, filteredPhotos, transition, imageQuality, isPlaying, addToFullCache, getPlaybackIndex]);
 
@@ -896,16 +1141,16 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   }, []);
 
   /* ================================================================ */
-  /*  10秒空闲检测 - 自动开始放映                                       */
+  /*  10秒空闲检�?- 自动开始放�?                                      */
   /* ================================================================ */
   useEffect(() => {
-    const IDLE_THRESHOLD = 10; // 10秒
+    const IDLE_THRESHOLD = 10; // 10�?
     
     const interval = setInterval(() => {
       setIdleSeconds((prev) => {
         const next = prev + 1;
         if (next >= IDLE_THRESHOLD && !isPlaying && !isLoading) {
-          // 达到阈值，自动开始播放
+          // 达到阈值，自动开始播�?
           setIsPlaying(true);
           return 0; // 重置计时
         }
@@ -916,7 +1161,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
     return () => clearInterval(interval);
   }, [isPlaying, isLoading]);
   
-  // 用户操作时重置空闲计时
+  // 用户操作时重置空闲计�?
   const resetIdleTimer = useCallback(() => {
     setIdleSeconds(0);
   }, []);
@@ -978,32 +1223,34 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
   }, [onClose, navigate, showControlsBriefly]);
 
   /* ================================================================ */
-  /*  Cleanup - 幻灯片关闭时彻底清理所有资源                          */
+  /*  Cleanup - 幻灯片关闭时彻底清理所有资�?                         */
   /* ================================================================ */
   useEffect(() => () => {
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
     if (prevIndexTimer.current) clearTimeout(prevIndexTimer.current);
     
-    // ★ 清理音频
+    // �?清理音频
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = '';
       audioRef.current = null;
     }
     
-    // ★ 清理所有图片缓存
+    // �?清理所有图片缓�?
     thumbCache.current.clear();
     thumbUrls.current.clear();
     previewCache.current.clear();
     previewUrls.current.clear();
     fullCache.current.clear();
     fullUrls.current.clear();
+    fullCacheBytes.current.clear();
+    fullCacheTotalBytes.current = 0;
     preloadedUrls.current.clear();
     imageCache.current.clear();
     loadingFullUrls.current.clear();
     kenBurnsCache.current.clear();
     
-    // ★ 清理预加载队列
+    // �?清理预加载队�?
     fullPreloadQueue.current = [];
     loadingFullCount.current = 0;
     
@@ -1062,7 +1309,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         </div>
       )}
 
-      {/* ★ Main Image Area */}
+      {/* �?Main Image Area */}
       <div className={`absolute inset-0 flex items-center justify-center p-3 sm:p-5 md:p-8 transition-opacity duration-500 ${isLoading ? 'opacity-0' : 'opacity-100'}`}>
         {/* 3D Page Flip Container */}
         <div 
@@ -1122,7 +1369,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
               {!imageLoaded && !thumbnailLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
                   <div className="relative">
-                    {/* 呼吸的光晕效果 */}
+                    {/* 呼吸的光晕效�?*/}
                     <div 
                       className="w-32 h-32 rounded-full bg-gradient-to-br from-yellow-400/30 to-orange-500/20"
                       style={{
@@ -1130,7 +1377,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                         filter: 'blur(20px)',
                       }}
                     />
-                    {/* 中心点 */}
+                    {/* 中心�?*/}
                     <div 
                       className="absolute inset-0 m-auto w-4 h-4 rounded-full bg-yellow-400/60"
                       style={{
@@ -1150,7 +1397,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   shouldDestroy={false}
                 />
               )}
-              {/* 缩略图（半透明叠加在粒子上） */}
+              {/* 缩略图（半透明叠加在粒子上�?*/}
               {!imageLoaded && thumbnailLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 1 }}>
                   <img
@@ -1235,7 +1482,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   particleCount={particleLevel}
                   shouldDestroy={imageLoaded || particleLevel === 0}
                 />
-                {/* 缩略图（半透明叠加在粒子上） */}
+                {/* 缩略图（半透明叠加在粒子上�?*/}
                 {!imageLoaded && thumbnailLoaded && (
                   <img
                     key={`${currentPhoto.id}-thumb`}
@@ -1245,7 +1492,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                     style={{ zIndex: 1, filter: 'blur(20px)', opacity: 0.35 }}
                   />
                 )}
-                {/* 原图（加载完成后才设置 src，避免渐进式渲染） */}
+                {/* 原图（加载完成后才设�?src，避免渐进式渲染�?*/}
                 <img
                   key={currentPhoto.id}
                   src={displayedUrl}
@@ -1299,10 +1546,10 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    // 右键切下一首
+                    // 右键切下一�?
                     setCurrentBgmIndex((prev) => (prev + 1) % bgmList.length);
                   }}
-                  title="双击显示列表 · 右键下一首"
+                  title="Double click to show list / right click for next track"
                 >
                   <Music size={14} className={`${isMuted ? 'text-white/40' : 'text-yellow-400'} flex-shrink-0`} />
                   <span className={`text-sm max-w-[200px] truncate ${isMuted ? 'text-white/50' : 'text-yellow-200'}`}>
@@ -1389,13 +1636,13 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
 
           {/* Image Quality */}
           <div className="space-y-2 mb-4">
-            <p className="text-white/60 text-xs flex items-center gap-2">🖼️ Quality</p>
+            <p className="text-white/60 text-xs flex items-center gap-2">🖼�?Quality</p>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); setImageQuality('display'); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${imageQuality === 'display' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                ⚡ 4K 压缩
+                �?4K 压缩
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setImageQuality('original'); }}
@@ -1404,6 +1651,29 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 💎 无损原图
               </button>
             </div>
+          </div>
+
+          {/* Performance Mode */}
+          <div className="space-y-2 mb-4">
+            <p className="text-white/60 text-xs flex items-center gap-2"><Monitor size={14} /> 播放性能</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { key: 'auto' as const, label: '智能' },
+                { key: 'tv' as const, label: '电视' },
+                { key: 'quality' as const, label: '画质' },
+              ]).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={(e) => { e.stopPropagation(); setPerformanceMode(key); }}
+                  className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${performanceMode === key ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-white/35 text-[11px]">
+              {PERFORMANCE_BUDGET_MB[performanceMode]}MB cache budget
+            </p>
           </div>
 
           {/* Orientation */}
@@ -1430,7 +1700,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           {/* Particle Toggle + Slider */}
           <div className="space-y-2 mb-4">
             <div className="flex items-center justify-between">
-              <span className="text-white/70 text-sm">✨ 粒子效果</span>
+              <span className="text-white/70 text-sm">�?粒子效果</span>
               <button
                 onClick={(e) => { e.stopPropagation(); setParticleLevel((prev) => prev > 0 ? 0 : 5); }}
                 className={`w-12 h-6 rounded-full transition-all ${
@@ -1469,7 +1739,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 onClick={(e) => { e.stopPropagation(); setMusicMode('background'); }}
                 className={`px-2 py-2 rounded-lg text-xs font-medium transition-all ${musicMode === 'background' ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/80 hover:bg-white/10'}`}
               >
-                🎧 背景音
+                🎧 背景�?
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setMusicMode('companion'); }}
@@ -1486,7 +1756,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           {/* Shortcuts */}
           <div className="mt-4 pt-4 border-t border-white/10 text-white/40 text-xs space-y-1">
             <div><span className="text-white/60">Space</span> Play/Pause</div>
-            <div><span className="text-white/60">← →</span> Navigate</div>
+            <div><span className="text-white/60">Arrow keys</span> Navigate</div>
             <div><span className="text-white/60">ESC</span> Exit</div>
             <div><span className="text-white/60">T</span> Transition ({transition})</div>
             <div><span className="text-white/60">R</span> Order ({isRandomOrder ? 'Random' : 'Sequential'})</div>
@@ -1510,7 +1780,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
           <div className="flex items-end justify-between gap-3 max-w-6xl mx-auto">
             {currentPhoto && (
               <div className="flex-1 min-w-0">
-                {/* 照片标题/意境描述 - 幻灯片时不显示 */}
+                {/* 照片标题/意境描述 - 幻灯片时不显�?*/}
                 {!isPlaying && (
                   <h2 className="text-white text-base sm:text-lg md:text-2xl font-light tracking-wide mb-2 truncate">
                     {photoAnalysis?.depict || currentPhoto.title}
@@ -1547,7 +1817,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                 </div>
                 {/* 桌面端：单排布局 */}
                 <div className="hidden md:flex items-center gap-4 text-white/60 text-sm font-light">
-                  {/* 文件夹/分类 */}
+                  {/* 文件�?分类 */}
                   {currentPhoto.category && (
                     <span className="flex items-center gap-1.5">
                       <span className="text-yellow-400/80">📁</span>
@@ -1573,13 +1843,13 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   )}
                   <span className="px-2 py-0.5 bg-white/10 rounded text-xs uppercase text-white/50">{currentOrientation}</span>
                 </div>
-                {/* 空闲倒计时提示 */}
+                {/* 空闲倒计时提�?*/}
                 {!isPlaying && idleSeconds > 0 && (
                   <div className="mt-3 text-white/30 text-xs">
                     {idleSeconds < 10 ? (
-                      <span>⏳ {10 - idleSeconds}秒后自动播放</span>
+                      <span>�?{10 - idleSeconds}秒后自动播放</span>
                     ) : (
-                      <span>▶️ 即将开始...</span>
+                      <span>▶️ 即将开�?..</span>
                     )}
                   </div>
                 )}
@@ -1592,7 +1862,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
         </div>
       </div>
 
-      {/* Progress Bar - 使用 ref 避免重渲染 */}
+      {/* Progress Bar - 使用 ref 避免重渲�?*/}
       <ProgressBar
         isPlaying={isPlaying}
         intervalSec={intervalSec}
@@ -1637,7 +1907,7 @@ const Slideshow: React.FC<SlideshowProps> = ({ photos, initialIndex = 0, onClose
                   }`}
                 >
                   <span className="text-xs text-white/30 w-5 text-right flex-shrink-0">
-                    {idx === currentBgmIndex ? '▶' : `${idx + 1}`}
+                    {idx === currentBgmIndex ? '>' : `${idx + 1}`}
                   </span>
                   <span className="truncate">
                     {bgm.filename.replace(/\.[^/.]+$/, '')}

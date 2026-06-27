@@ -138,6 +138,7 @@ galleryService.on('photoAdded', (photo) => {
   io.emit('photo:added', {
     id: photo.id,
     url: `/photowall/api/image/${photo.id}`,
+    previewUrl: `/photowall/api/preview/${photo.id}`,
     originalUrl: `/photowall/api/image/${photo.id}`,
     thumbnail: `/photowall/api/thumbnail/${photo.id}`,
     title: photo.title,
@@ -195,6 +196,7 @@ galleryService.on('photoUpdated', (photo) => {
   io.emit('photo:updated', {
     id: photo.id,
     url: `/photowall/api/image/${photo.id}`,
+    previewUrl: `/photowall/api/preview/${photo.id}`,
     originalUrl: `/photowall/api/image/${photo.id}`,
     thumbnail: `/photowall/api/thumbnail/${photo.id}`,
     title: photo.title,

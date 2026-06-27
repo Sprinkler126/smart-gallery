@@ -27,6 +27,8 @@ export class ImageProcessor {
       : path.resolve(process.cwd(), this.thumbnailConfig.cacheDir);
     this.thumbnailConfig.cacheDir = this.cacheDir;
     this.cacheIndex = new Map(); // Track cache usage
+    this.previewInFlight = new Map();
+    this.displayInFlight = new Map();
     fs.ensureDirSync(this.cacheDir);
     
     // Auto-clean cache on startup if enabled
@@ -357,6 +359,58 @@ export class ImageProcessor {
   }
 
   /**
+   * Get or create a 1920px preview image for progressive slideshow loading.
+   */
+  async getPreviewImage(imagePath) {
+    try {
+      if (!this.isSupportedFormat(imagePath)) return null;
+      if (await this.isHeifFormat(imagePath)) return null;
+
+      const stats = await fs.stat(imagePath);
+      const hash = this.generateImageHash(imagePath, stats);
+      const previewFilename = `preview_${hash}.jpg`;
+      const previewDir = path.join(path.dirname(this.cacheDir), 'preview');
+      const previewPath = path.join(previewDir, previewFilename);
+
+      if (await fs.pathExists(previewPath)) {
+        return { path: previewPath, filename: previewFilename, cached: true };
+      }
+
+      await fs.ensureDir(previewDir);
+
+      const inFlightKey = previewPath;
+      if (this.previewInFlight.has(inFlightKey)) {
+        await this.previewInFlight.get(inFlightKey);
+        if (await fs.pathExists(previewPath)) {
+          return { path: previewPath, filename: previewFilename, cached: true };
+        }
+      }
+
+      const generatePreview = sharp(imagePath)
+        .rotate()
+        .resize(1920, null, {
+          withoutEnlargement: true,
+          fit: 'inside',
+        })
+        .jpeg({ quality: 82, progressive: true, mozjpeg: true })
+        .toFile(previewPath);
+
+      this.previewInFlight.set(inFlightKey, generatePreview);
+
+      try {
+        await generatePreview;
+      } finally {
+        this.previewInFlight.delete(inFlightKey);
+      }
+
+      return { path: previewPath, filename: previewFilename, cached: false };
+    } catch (error) {
+      console.error(`Error generating preview image for ${imagePath}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Get or create a 4K display image (max 3840px, quality 85, progressive JPEG)
    * For slideshow use - much smaller than original but still sharp on 4K displays
    */
@@ -378,8 +432,15 @@ export class ImageProcessor {
 
       await fs.ensureDir(displayDir);
 
-      // Generate 4K display image
-      await sharp(imagePath)
+      const inFlightKey = displayPath;
+      if (this.displayInFlight.has(inFlightKey)) {
+        await this.displayInFlight.get(inFlightKey);
+        if (await fs.pathExists(displayPath)) {
+          return { path: displayPath, filename: displayFilename, cached: true };
+        }
+      }
+
+      const generateDisplay = sharp(imagePath)
         .rotate()
         .resize(3840, null, {
           withoutEnlargement: true,
@@ -387,6 +448,14 @@ export class ImageProcessor {
         })
         .jpeg({ quality: 85, progressive: true, mozjpeg: true })
         .toFile(displayPath);
+
+      this.displayInFlight.set(inFlightKey, generateDisplay);
+
+      try {
+        await generateDisplay;
+      } finally {
+        this.displayInFlight.delete(inFlightKey);
+      }
 
       return { path: displayPath, filename: displayFilename, cached: false };
     } catch (error) {
@@ -445,25 +514,37 @@ export class ImageProcessor {
    */
   async getCacheStats() {
     try {
-      const files = await fs.readdir(this.cacheDir);
+      const cacheDirs = [
+        this.cacheDir,
+        path.join(path.dirname(this.cacheDir), 'preview'),
+        path.join(path.dirname(this.cacheDir), 'display')
+      ];
+      let count = 0;
       let totalSize = 0;
       
-      for (const file of files) {
-        const filePath = path.join(this.cacheDir, file);
-        try {
-          const stats = await fs.stat(filePath);
-          totalSize += stats.size;
-        } catch {
-          // Ignore errors
+      for (const dir of cacheDirs) {
+        if (!await fs.pathExists(dir)) continue;
+        const files = await fs.readdir(dir);
+        count += files.length;
+
+        for (const file of files) {
+          const filePath = path.join(dir, file);
+          try {
+            const stats = await fs.stat(filePath);
+            totalSize += stats.size;
+          } catch {
+            // Ignore errors
+          }
         }
       }
 
       return {
-        count: files.length,
+        count,
         maxSize: this.thumbnailConfig.maxCacheSize || 1000,
         totalSizeBytes: totalSize,
         totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2),
-        directory: this.cacheDir
+        directory: this.cacheDir,
+        directories: cacheDirs
       };
     } catch (error) {
       console.error('Error getting cache stats:', error);
@@ -504,11 +585,21 @@ export class ImageProcessor {
     try {
       console.log('🧹 Clearing all thumbnail cache...');
       
-      // Remove all files in cache directory
-      await fs.emptyDir(this.cacheDir);
+      const cacheDirs = [
+        this.cacheDir,
+        path.join(path.dirname(this.cacheDir), 'preview'),
+        path.join(path.dirname(this.cacheDir), 'display')
+      ];
+
+      for (const dir of cacheDirs) {
+        await fs.ensureDir(dir);
+        await fs.emptyDir(dir);
+      }
       
       // Reset cache index
       this.cacheIndex.clear();
+      this.previewInFlight.clear();
+      this.displayInFlight.clear();
       
       console.log('✅ All thumbnail cache cleared');
       return { success: true };

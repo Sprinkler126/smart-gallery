@@ -10,9 +10,9 @@ import CreativePanel from './components/CreativePanel';
 import ExifFramePanel from './components/ExifFramePanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
-import { Grid, LayoutTemplate, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles } from 'lucide-react';
+import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig } from 'lucide-react';
 
-// 检测是否为本地访问（只有本地才能看到管理入口）
+// 妫€娴嬫槸鍚︿负鏈湴璁块棶锛堝彧鏈夋湰鍦版墠鑳界湅鍒扮鐞嗗叆鍙ｏ級
 const isLocalAccess = (): boolean => {
   const hostname = window.location.hostname;
   return (
@@ -30,11 +30,27 @@ const isLocalAccess = (): boolean => {
   );
 };
 
+const toolbarButtonClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-400 transition-all hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 disabled:cursor-not-allowed disabled:opacity-50';
+const toolbarButtonActiveClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md bg-gold text-obsidian shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70';
+const footerIconButtonClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-gray-400 transition-colors hover:bg-gold hover:text-obsidian focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70';
+
+interface ResetJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  step?: string;
+  error?: string;
+  result?: {
+    totalPhotos?: number;
+    cacheCleared?: number;
+    cacheSizeBefore?: string;
+  };
+}
+
 const App: React.FC = () => {
-  // 全局图片保护：禁用右键、拖拽、选择
+  // 鍏ㄥ眬鍥剧墖淇濇姢锛氱鐢ㄥ彸閿€佹嫋鎷姐€侀€夋嫨
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
-      // 只保护图片区域，其他区域（如按钮）允许右键
+      // 鍙繚鎶ゅ浘鐗囧尯鍩燂紝鍏朵粬鍖哄煙锛堝鎸夐挳锛夊厑璁稿彸閿?
       const target = e.target as HTMLElement;
       if (target.tagName === 'IMG' || target.closest('.protected-image')) {
         e.preventDefault();
@@ -52,7 +68,7 @@ const App: React.FC = () => {
       }
     };
     
-    // 禁用保存快捷键
+    // 绂佺敤淇濆瓨蹇嵎閿?
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl+S / Cmd+S
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -86,6 +102,7 @@ const App: React.FC = () => {
     isApiAvailable,
     isConnected,
     refresh,
+    reload,
     filterByCategory,
     currentCategory,
     filteredPhotos,
@@ -108,6 +125,7 @@ const App: React.FC = () => {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.MASONRY);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   
   // Multi-select state
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
@@ -131,18 +149,18 @@ const App: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [heroPhotos, setHeroPhotos] = useState<Photo[]>([]);
   
-  // 首页空闲检测 - 10秒无操作自动进入幻灯片
+  // 棣栭〉绌洪棽妫€娴?- 10绉掓棤鎿嶄綔鑷姩杩涘叆骞荤伅鐗?
   const [homeIdleSeconds, setHomeIdleSeconds] = useState(0);
   const [idlePaused, setIdlePaused] = useState(false);
 
-  // 是否显示管理功能（只有本地访问才显示）
+  // 鏄惁鏄剧ず绠＄悊鍔熻兘锛堝彧鏈夋湰鍦拌闂墠鏄剧ず锛?
   const showAdminFeatures = isLocalAccess() && isApiAvailable;
 
   // Get app name and photographer name from config or fallback
   const appName = config?.appName || 'SPRINKLER';
   const photographerName = config?.photographerName || 'Sprinkler';
 
-  // 获取横图用于首页 Hero 展示
+  // 鑾峰彇妯浘鐢ㄤ簬棣栭〉 Hero 灞曠ず
   useEffect(() => {
     if (photos.length === 0) return;
     
@@ -153,21 +171,21 @@ const App: React.FC = () => {
         if (!data.success) return;
         
         const orientations = data.orientations as Record<string, 'landscape' | 'portrait' | 'square'>;
-        // 只选横图（landscape 或 square）
+        // 鍙€夋í鍥撅紙landscape 鎴?square锛?
         const landscapePhotos = photos.filter(p => {
           const o = orientations[p.id];
           return o === 'landscape' || o === 'square';
         });
         
-        // 如果没有横图，fallback 到所有照片
+        // 濡傛灉娌℃湁妯浘锛宖allback 鍒版墍鏈夌収鐗?
         const pool = landscapePhotos.length > 0 ? landscapePhotos : photos;
         
-        // 随机打乱取前 5 张
+        // 闅忔満鎵撲贡鍙栧墠 5 寮?
         const shuffled = [...pool].sort(() => Math.random() - 0.5);
         setHeroPhotos(shuffled.slice(0, Math.min(5, shuffled.length)));
         setHeroIndex(0);
       } catch {
-        // fallback: 用所有照片
+        // fallback: 鐢ㄦ墍鏈夌収鐗?
         setHeroPhotos(photos.slice(0, 5));
       }
     };
@@ -175,7 +193,7 @@ const App: React.FC = () => {
     fetchOrientations();
   }, [photos]);
 
-  // Hero Image Auto-Rotation - 12秒切换一次
+  // Hero Image Auto-Rotation - 12绉掑垏鎹竴娆?
   useEffect(() => {
     if (heroPhotos.length === 0) return;
     const interval = setInterval(() => {
@@ -194,14 +212,14 @@ const App: React.FC = () => {
   }, []);
   
   // ================================================================
-  // 首页空闲检测 - 10秒无操作自动进入幻灯片
-  // 注意：大图预览(Lightbox)打开时不触发自动幻灯片
+  // 棣栭〉绌洪棽妫€娴?- 10绉掓棤鎿嶄綔鑷姩杩涘叆骞荤伅鐗?
+  // 娉ㄦ剰锛氬ぇ鍥鹃瑙?Lightbox)鎵撳紑鏃朵笉瑙﹀彂鑷姩骞荤伅鐗?
   // ================================================================
   useEffect(() => {
-    // 如果已经在幻灯片模式，或打开了 Lightbox，不执行空闲检测
+    // 濡傛灉宸茬粡鍦ㄥ够鐏墖妯″紡锛屾垨鎵撳紑浜?Lightbox锛屼笉鎵ц绌洪棽妫€娴?
     if (showSlideshow || selectedPhotoIndex !== null) return;
     
-    const IDLE_THRESHOLD = 10; // 10秒
+    const IDLE_THRESHOLD = 10; // 10绉?
     
     const interval = setInterval(() => {
       if (idlePaused || photos.length === 0) return;
@@ -209,7 +227,7 @@ const App: React.FC = () => {
       setHomeIdleSeconds((prev) => {
         const next = prev + 1;
         if (next >= IDLE_THRESHOLD) {
-          // 达到阈值，自动进入幻灯片
+          // 杈惧埌闃堝€硷紝鑷姩杩涘叆骞荤伅鐗?
           setSlideshowIndex(0);
           setShowSlideshow(true);
           return 0;
@@ -221,7 +239,7 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [showSlideshow, idlePaused, photos.length, selectedPhotoIndex]);
   
-  // 用户操作时重置首页空闲计时
+  // 鐢ㄦ埛鎿嶄綔鏃堕噸缃椤电┖闂茶鏃?
   useEffect(() => {
     const events = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
     const handler = () => setHomeIdleSeconds(0);
@@ -254,7 +272,7 @@ const App: React.FC = () => {
       
       if (result.success) {
         await refresh();
-        console.log('✅ Photo deleted successfully');
+        console.log('鉁?Photo deleted successfully');
       } else {
         console.error('Failed to delete photo:', result.error);
         alert('Failed to delete photo: ' + result.error);
@@ -266,29 +284,49 @@ const App: React.FC = () => {
   };
 
   const handleReset = async () => {
-    if (!confirm('⚠️ Reset Gallery?\n\nThis will:\n1. Delete ALL cached thumbnails\n2. Rebuild thumbnails from scratch\n\nThis may take a while if you have many photos.\n\nContinue?')) {
+    if (isResetting) return;
+
+    if (!confirm('鈿狅笍 Reset Gallery?\n\nThis will:\n1. Delete ALL cached thumbnails\n2. Rebuild thumbnails in the background\n\nYou can keep using the app while the reset job runs.\n\nContinue?')) {
       return;
     }
 
+    setIsResetting(true);
+
     try {
-      console.log('🔄 Starting reset...');
-      
       const response = await adminFetch('/photowall/api/reset', {
         method: 'POST',
       });
-      
+
       const result = await response.json();
-      
-      if (result.success) {
-        console.log('✅ Reset completed:', result.data);
-        alert(`✅ Reset Completed!\n\nCleared ${result.data.cacheCleared} cached thumbnails\nRebuilt ${result.data.totalPhotos} photos\n\nCache size: ${result.data.cacheSizeBefore}MB → 0MB`);
-      } else {
-        console.error('Reset failed:', result.error);
-        alert('Reset failed: ' + result.error);
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to start reset job');
       }
+
+      let job = result.data as ResetJob;
+      while (job.status === 'queued' || job.status === 'running') {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const jobResponse = await fetch(`/photowall/api/reset/jobs/${job.id}`);
+        const jobResult = await jobResponse.json();
+        if (!jobResponse.ok || !jobResult.success) {
+          throw new Error(jobResult.error || 'Failed to load reset job');
+        }
+        job = jobResult.data as ResetJob;
+      }
+
+      if (job.status !== 'completed') {
+        throw new Error(job.error || 'Reset job failed');
+      }
+
+      await reload();
+
+      const resetResult = job.result || {};
+      alert(`鉁?Reset Completed!\n\nCleared ${resetResult.cacheCleared || 0} cached thumbnails\nRebuilt ${resetResult.totalPhotos || 0} photos\n\nCache size before reset: ${resetResult.cacheSizeBefore || '0.00'}MB`);
     } catch (error) {
       console.error('Error resetting gallery:', error);
       alert('Error resetting gallery: ' + (error as Error).message);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -324,7 +362,7 @@ const App: React.FC = () => {
     if (selectedPhotos.size === 0) return;
     
     const confirmed = confirm(
-      `⚠️ Delete ${selectedPhotos.size} photos?\n\nThis will permanently delete these photos and their thumbnails. This action cannot be undone.`
+      `鈿狅笍 Delete ${selectedPhotos.size} photos?\n\nThis will permanently delete these photos and their thumbnails. This action cannot be undone.`
     );
     
     if (!confirmed) return;
@@ -355,9 +393,9 @@ const App: React.FC = () => {
     setIsMultiSelectMode(false);
     
     if (failCount > 0) {
-      alert(`✅ Deleted ${successCount} photos\n❌ Failed to delete ${failCount} photos`);
+      alert(`鉁?Deleted ${successCount} photos\n鉂?Failed to delete ${failCount} photos`);
     } else {
-      alert(`✅ Successfully deleted ${successCount} photos`);
+      alert(`鉁?Successfully deleted ${successCount} photos`);
     }
   };
 
@@ -392,7 +430,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-obsidian text-white flex flex-col font-sans overflow-x-hidden">
       
-      {/* Connection Status Indicator - 只在本地显示 */}
+      {/* Connection Status Indicator - 鍙湪鏈湴鏄剧ず */}
       {showAdminFeatures && (
         <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-all ${
           isConnected 
@@ -407,7 +445,7 @@ const App: React.FC = () => {
       )}
 
       {/* 1. Full Screen Hero Section */}
-      <section className="relative h-[100svh] min-h-[560px] md:h-screen w-full overflow-hidden flex items-center justify-center">
+      <section className="relative h-[100svh] min-h-[600px] md:h-screen w-full overflow-hidden flex items-center justify-center">
         
         {/* Dynamic Frosted Background */}
         <div className="absolute inset-0 z-0">
@@ -420,33 +458,44 @@ const App: React.FC = () => {
               style={{ backgroundImage: `url(${photo.thumbnail || photo.url})` }}
             />
           ))}
-          <div className="absolute inset-0 bg-black/40" />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-obsidian/20 to-obsidian" />
+          <div className="absolute inset-0 bg-black/45" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(15,15,17,0.35)_48%,rgba(15,15,17,0.9)_100%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-obsidian/20 via-transparent to-obsidian" />
         </div>
 
         {/* Hero Content */}
-        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full px-3 sm:px-4 py-16 sm:py-20 text-center">
+        <div className="relative z-10 flex h-full w-full flex-col items-center justify-center px-4 py-16 text-center sm:px-6 sm:py-20">
            
-           {/* Glass Card Container for Main Image */}
-           <div className="glass-card p-2.5 sm:p-4 rounded-xl shadow-2xl animate-fade-in transform hover:scale-[1.01] transition-transform duration-700 max-w-4xl w-full mb-5 sm:mb-8">
-              <div className="relative aspect-[16/9] md:aspect-[21/9] w-full overflow-hidden rounded-lg bg-black/50">
-                 {/* Carousel Images - 使用原图 */}
+           {/* Main cover image */}
+           <div className="animate-fade-in mb-5 w-full max-w-6xl sm:mb-7">
+              <div className="relative h-[46svh] min-h-[280px] max-h-[620px] w-full overflow-hidden rounded-lg border border-white/10 bg-black/45 shadow-2xl sm:h-[52svh]">
+                 {heroPhotos.map((photo, index) => (
+                   <div
+                     key={`${photo.id}-fill`}
+                     className={`absolute inset-0 bg-cover bg-center blur-2xl scale-110 transition-opacity duration-[1500ms] ${
+                       index === heroIndex ? 'opacity-45' : 'opacity-0'
+                     }`}
+                     style={{ backgroundImage: `url(${photo.thumbnail || photo.url})` }}
+                   />
+                 ))}
+                 <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-black/20" />
+                 {/* Carousel Images - 浣跨敤鍘熷浘 */}
                  {heroPhotos.map((photo, index) => (
                     <img 
                       key={photo.id}
                       src={photo.url}
                       alt={photo.title}
-                      className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-[1500ms] ${
+                      className={`absolute inset-0 w-full h-full object-contain p-2 transition-opacity duration-[1500ms] sm:p-4 ${
                         index === heroIndex ? 'opacity-100' : 'opacity-0'
                       }`}
                       draggable={false}
                     />
                  ))}
                  
-                 {/* Overlay Text inside image - 只显示分类 */}
-                 <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-8 bg-gradient-to-t from-black/80 to-transparent text-left">
+                 {/* Overlay Text inside image - 鍙樉绀哄垎绫?*/}
+                 <div className="absolute bottom-0 left-0 right-0 p-4 text-left sm:p-6">
                     {currentHeroPhoto && (
-                      <p className="text-gold text-xs sm:text-sm uppercase tracking-widest animate-fade-in-slow">
+                      <p className="inline-flex rounded-full bg-black/45 px-3 py-1.5 text-xs uppercase tracking-widest text-gold backdrop-blur-sm sm:text-sm">
                         {currentHeroPhoto.category}
                       </p>
                     )}
@@ -464,10 +513,11 @@ const App: React.FC = () => {
              </p>
            </div>
 
-           {/* Scroll Down Indicator - 固定在底部 */}
+           {/* Scroll Down Indicator - 鍥哄畾鍦ㄥ簳閮?*/}
            <button 
              onClick={scrollToGallery}
-             className="absolute bottom-8 left-1/2 transform -translate-x-1/2 animate-pulse-slow text-white/50 hover:text-white transition-colors z-20"
+             className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 touch-manipulation animate-pulse-slow rounded-full px-4 py-2 text-white/55 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
+             aria-label="Explore gallery"
            >
              <div className="flex flex-col items-center gap-2">
                <span className="text-[10px] uppercase tracking-widest">Explore Gallery</span>
@@ -475,15 +525,15 @@ const App: React.FC = () => {
              </div>
            </button>
            
-           {/* 空闲倒计时提示 - 自动播放幻灯片 */}
+           {/* 绌洪棽鍊掕鏃舵彁绀?- 鑷姩鎾斁骞荤伅鐗?*/}
            {homeIdleSeconds > 0 && !showSlideshow && (
              <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-20 w-[calc(100%-2rem)] max-w-sm">
                <div className="bg-black/60 backdrop-blur-sm px-4 py-2 rounded-full text-white/70 text-xs sm:text-sm flex items-center justify-center gap-2 animate-fade-in">
                  <Play size={14} className="text-yellow-400" />
                  <span>
-                   {homeIdleSeconds < 10 
-                     ? `${10 - homeIdleSeconds}秒后自动播放幻灯片` 
-                     : '即将开始...'}
+                    {homeIdleSeconds < 10
+                      ? `${10 - homeIdleSeconds}s until slideshow`
+                      : 'Starting...'}
                  </span>
                </div>
              </div>
@@ -501,7 +551,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex flex-1 sm:flex-none flex-wrap sm:flex-nowrap items-center justify-end gap-2 md:gap-4 min-w-0">
-            {/* Search Box - 移动端简化 */}
+            {/* Search Box - 绉诲姩绔畝鍖?*/}
             <div className="flex basis-full sm:basis-auto flex-1 sm:flex-none items-center gap-1 md:gap-2 bg-white/5 rounded-lg px-2 md:px-3 py-2 sm:py-1.5 min-w-0">
               <Search size={16} className="text-gray-500 flex-shrink-0" />
               <input
@@ -509,18 +559,20 @@ const App: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && performSearch()}
-                placeholder="搜索..."
+                placeholder="鎼滅储..."
                 className="bg-transparent border-none outline-none text-[16px] sm:text-sm text-white placeholder-gray-500 w-16 sm:w-28 md:w-48 min-w-0"
               />
               {searchQuery && (
                 <button
                   onClick={clearSearch}
-                  className="text-gray-500 hover:text-white"
+                  className="touch-manipulation inline-flex h-8 w-8 items-center justify-center rounded text-gray-500 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
+                  aria-label="Clear search"
+                  title="Clear search"
                 >
                   <X size={14} />
                 </button>
               )}
-              {/* Search Mode Toggle - 桌面端显示 */}
+              {/* Search Mode Toggle - 妗岄潰绔樉绀?*/}
               <button
                 onClick={() => setSearchMode(searchMode === 'fuzzy' ? 'semantic' : 'fuzzy')}
                 className={`hidden md:inline-block text-xs px-2 py-0.5 rounded border transition-colors ${
@@ -528,14 +580,16 @@ const App: React.FC = () => {
                     ? 'border-gold text-gold'
                     : 'border-gray-600 text-gray-500 hover:border-gray-400'
                 }`}
-                title={searchMode === 'fuzzy' ? '模糊搜索 - 点击切换标签搜索' : '标签搜索 - 点击切换模糊搜索'}
+                title={searchMode === 'fuzzy' ? '妯＄硦鎼滅储 - 鐐瑰嚮鍒囨崲鏍囩鎼滅储' : '鏍囩鎼滅储 - 鐐瑰嚮鍒囨崲妯＄硦鎼滅储'}
               >
-                {searchMode === 'fuzzy' ? '模糊' : '标签'}
+                {searchMode === 'fuzzy' ? '妯＄硦' : '鏍囩'}
               </button>
               <button
                 onClick={performSearch}
                 disabled={isSearching || !searchQuery.trim()}
-                className="p-2.5 sm:p-1.5 rounded bg-gold/20 text-gold hover:bg-gold/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="touch-manipulation inline-flex h-9 w-9 items-center justify-center rounded bg-gold/20 text-gold transition-colors hover:bg-gold/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                aria-label="Search"
+                title="Search"
               >
                 {isSearching ? <Loader2 size={16} className="animate-spin sm:w-3.5 sm:h-3.5" /> : <Search size={16} className="sm:w-3.5 sm:h-3.5" />}
               </button>
@@ -545,42 +599,47 @@ const App: React.FC = () => {
             <div className="flex flex-shrink-0 gap-1 bg-white/5 p-1 rounded-lg">
               <button 
                 onClick={() => setViewMode(ViewMode.GRID)}
-                className={`p-2.5 sm:p-2 rounded-md transition-all ${viewMode === ViewMode.GRID ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={viewMode === ViewMode.GRID ? toolbarButtonActiveClass : toolbarButtonClass}
                 title="Grid View"
+                aria-label="Grid View"
               >
-                <Grid size={16} className="md:w-[18px] md:h-[18px]" />
+                <Grid size={18} />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.MASONRY)}
-                className={`p-2.5 sm:p-2 rounded-md transition-all ${viewMode === ViewMode.MASONRY ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={viewMode === ViewMode.MASONRY ? toolbarButtonActiveClass : toolbarButtonClass}
                 title="Masonry View"
+                aria-label="Masonry View"
               >
-                <LayoutTemplate size={16} className="md:w-[18px] md:h-[18px]" />
+                <Images size={18} />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.TIMELINE)}
-                className={`p-2.5 sm:p-2 rounded-md transition-all ${viewMode === ViewMode.TIMELINE ? 'bg-charcoal text-gold shadow-sm' : 'text-gray-500 hover:text-white'}`}
+                className={viewMode === ViewMode.TIMELINE ? toolbarButtonActiveClass : toolbarButtonClass}
                 title="Timeline View"
+                aria-label="Timeline View"
               >
-                <Clock size={16} className="md:w-[18px] md:h-[18px]" />
+                <Clock size={18} />
               </button>
               {/* Slideshow Button */}
               <button
                 onClick={() => openSlideshow(0)}
-                className="p-2.5 sm:p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all border-l border-white/10 ml-1"
+                className={`${toolbarButtonClass} ml-1 border-l border-white/10 hover:text-gold`}
                 title="Start Slideshow"
+                aria-label="Start Slideshow"
               >
-                <Play size={16} className="md:w-[18px] md:h-[18px]" />
+                <Play size={18} />
               </button>
             </div>
 
-            {/* Refresh & Reset Buttons - 只在本地显示 */}
+            {/* Refresh & Reset Buttons - 鍙湪鏈湴鏄剧ず */}
             {showAdminFeatures && (
               <div className="hidden md:flex items-center gap-2">
                 <button
                   onClick={() => setShowCreativePanel(true)}
-                  className="p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all"
+                  className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
                   title="Creative Tools"
+                  aria-label="Creative Tools"
                 >
                   <Sparkles size={18} />
                 </button>
@@ -591,8 +650,9 @@ const App: React.FC = () => {
                     setAiAnalysisPhoto(undefined);
                     setShowAIAnalysis(true);
                   }}
-                  className="p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gold transition-all"
+                  className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
                   title="AI Analysis"
+                  aria-label="AI Analysis"
                 >
                   <Brain size={18} />
                 </button>
@@ -600,22 +660,21 @@ const App: React.FC = () => {
                 {/* Multi-select Toggle */}
                 <button
                   onClick={toggleMultiSelectMode}
-                  className={`p-2 rounded-md transition-all ${
-                    isMultiSelectMode 
-                      ? 'bg-gold text-obsidian' 
-                      : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-                  }`}
-                  title="Multi-select mode"
+                  className={isMultiSelectMode ? toolbarButtonActiveClass : `${toolbarButtonClass} bg-white/5`}
+                  title={isMultiSelectMode ? 'Exit multi-select mode' : 'Select multiple photos'}
+                  aria-label={isMultiSelectMode ? 'Exit multi-select mode' : 'Select multiple photos'}
+                  aria-pressed={isMultiSelectMode}
                 >
-                  {isMultiSelectMode ? <X size={18} /> : <Check size={18} />}
+                  <ListChecks size={18} />
                 </button>
 
                 {/* Refresh Button */}
                 <button
                   onClick={() => refresh()}
                   disabled={isRefreshing}
-                  className={`p-2 rounded-md bg-white/5 hover:bg-white/10 transition-all ${isRefreshing ? 'opacity-50' : ''}`}
+                  className={`${toolbarButtonClass} bg-white/5 ${isRefreshing ? 'opacity-50' : ''}`}
                   title="Refresh Gallery (reload photos)"
+                  aria-label="Refresh Gallery"
                 >
                   <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
@@ -623,8 +682,10 @@ const App: React.FC = () => {
                 {/* Admin Panel Toggle */}
                 <button
                   onClick={() => setShowAdmin(!showAdmin)}
-                  className={`p-2 rounded-md transition-all ${showAdmin ? 'bg-gold text-obsidian' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}
+                  className={showAdmin ? toolbarButtonActiveClass : `${toolbarButtonClass} bg-white/5`}
                   title="Admin Panel"
+                  aria-label="Admin Panel"
+                  aria-pressed={showAdmin}
                 >
                   <Settings size={18} />
                 </button>
@@ -636,7 +697,7 @@ const App: React.FC = () => {
         {/* Categories Navigation */}
         <div className="border-t border-white/5 bg-black/20">
           <div className="max-w-7xl mx-auto px-3 md:px-6 py-3">
-            {/* 桌面端：横排按钮 */}
+            {/* 妗岄潰绔細妯帓鎸夐挳 */}
             <div className="hidden md:flex flex-wrap items-center gap-x-8 gap-y-2">
               {categories.map(cat => (
                 <button
@@ -656,7 +717,7 @@ const App: React.FC = () => {
                 </button>
               ))}
             </div>
-            {/* 移动端：下拉选择器 */}
+            {/* 绉诲姩绔細涓嬫媺閫夋嫨鍣?*/}
             <div className="md:hidden relative">
               <button
                 onClick={() => {
@@ -700,7 +761,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Admin Panel - 只在本地显示 */}
+      {/* Admin Panel - 鍙湪鏈湴鏄剧ず */}
       {showAdmin && showAdminFeatures && (
         <AdminPanel
           sources={sources}
@@ -711,6 +772,7 @@ const App: React.FC = () => {
           onRefresh={refresh}
           onReset={handleReset}
           isRefreshing={isRefreshing}
+          isResetting={isResetting}
           onClose={() => setShowAdmin(false)}
         />
       )}
@@ -728,15 +790,15 @@ const App: React.FC = () => {
             <Search size={48} strokeWidth={1} className="mb-4 opacity-50"/>
             {searchResults !== null ? (
               <>
-                <p>没有找到匹配 "{searchQuery}" 的照片</p>
+                <p>No photos found for "{searchQuery}"</p>
                 <p className="text-sm text-gray-500 mt-2">
-                  当前模式: {searchMode === 'fuzzy' ? '模糊搜索' : '语义搜索'}
+                  褰撳墠妯″紡: {searchMode === 'fuzzy' ? '妯＄硦鎼滅储' : '璇箟鎼滅储'}
                 </p>
                 <button 
                   onClick={clearSearch}
                   className="mt-4 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors"
                 >
-                  清除搜索
+                  娓呴櫎鎼滅储
                 </button>
               </>
             ) : (
@@ -769,7 +831,7 @@ const App: React.FC = () => {
                       selectedPhotos.has(photo.id) ? 'ring-2 ring-gold ring-offset-2 ring-offset-obsidian' : ''
                     }`}
                     onClick={(e) => {
-                      // 移动端：第一次点击显示overlay，第二次点击打开lightbox
+                      // 绉诲姩绔細绗竴娆＄偣鍑绘樉绀簅verlay锛岀浜屾鐐瑰嚮鎵撳紑lightbox
                       const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
                       if (isMobile && !isMultiSelectMode) {
                         if (mobileOverlayPhotoId !== photo.id) {
@@ -786,7 +848,7 @@ const App: React.FC = () => {
                       }
                     }}
                     onMouseLeave={() => {
-                      // 鼠标离开时清除移动端overlay
+                      // 榧犳爣绂诲紑鏃舵竻闄ょЩ鍔ㄧoverlay
                       if (mobileOverlayPhotoId === photo.id) {
                         setMobileOverlayPhotoId(null);
                       }
@@ -863,22 +925,25 @@ const App: React.FC = () => {
 
       {/* Multi-select Action Bar */}
       {isMultiSelectMode && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-charcoal/95 backdrop-blur-md border-t border-white/10 px-4 sm:px-6 py-3 sm:py-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="flex items-center justify-between sm:justify-start gap-4">
-              <span className="text-white font-medium">
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-charcoal/95 backdrop-blur-md border-t border-white/10 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-4 sm:pb-4">
+          <div className="max-w-7xl mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <span className="mr-auto inline-flex items-center gap-2 text-white font-medium sm:mr-2">
+                <ListChecks size={18} className="text-gold" />
                 {selectedPhotos.size} selected
               </span>
               <button
                 onClick={selectAll}
-                className="text-sm text-gold hover:text-gold/80 transition-colors"
+                className="touch-manipulation inline-flex h-10 items-center gap-2 rounded-md bg-white/5 px-3 text-sm text-gold transition-colors hover:bg-white/10 hover:text-gold-light focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
               >
+                <SquareCheckBig size={16} />
                 Select All
               </button>
               <button
                 onClick={deselectAll}
-                className="text-sm text-gray-400 hover:text-white transition-colors"
+                className="touch-manipulation inline-flex h-10 items-center gap-2 rounded-md bg-white/5 px-3 text-sm text-gray-400 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
               >
+                <Square size={16} />
                 Deselect All
               </button>
             </div>
@@ -889,14 +954,15 @@ const App: React.FC = () => {
                   setIsMultiSelectMode(false);
                   setSelectedPhotos(new Set());
                 }}
-                className="px-3 sm:px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                className="touch-manipulation inline-flex h-10 items-center gap-2 rounded-md px-3 text-gray-400 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 sm:px-4"
               >
+                <X size={16} />
                 Cancel
               </button>
               <button
                 onClick={handleMultiDelete}
                 disabled={selectedPhotos.size === 0}
-                className="px-3 sm:px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 disabled:cursor-not-allowed text-white rounded transition-colors flex items-center gap-2 text-sm sm:text-base"
+                className="touch-manipulation inline-flex h-10 items-center gap-2 rounded-md bg-red-600 px-3 text-sm text-white transition-colors hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300 disabled:cursor-not-allowed disabled:bg-red-600/50 sm:px-4 sm:text-base"
               >
                 <Trash2 size={18} />
                 <span className="hidden sm:inline">Delete Selected</span>
@@ -917,14 +983,14 @@ const App: React.FC = () => {
               Capturing moments of silence, chaos, and beauty in between. A visual journey by {photographerName}.
             </p>
             <div className="flex gap-4 justify-center md:justify-start pt-2">
-               <button className="p-2 bg-white/5 rounded-full hover:bg-gold hover:text-obsidian transition-colors"><Instagram size={18}/></button>
-               <button className="p-2 bg-white/5 rounded-full hover:bg-gold hover:text-obsidian transition-colors"><Mail size={18}/></button>
-               <button className="p-2 bg-white/5 rounded-full hover:bg-gold hover:text-obsidian transition-colors"><Camera size={18}/></button>
+               <button className={footerIconButtonClass} aria-label="Instagram" title="Instagram"><Instagram size={18}/></button>
+               <button className={footerIconButtonClass} aria-label="Email" title="Email"><Mail size={18}/></button>
+               <button className={footerIconButtonClass} aria-label="Camera" title="Camera"><Camera size={18}/></button>
             </div>
           </div>
 
           <div className="text-[10px] text-gray-600 uppercase tracking-widest text-center md:text-right space-y-2">
-            <p>© {new Date().getFullYear()} {photographerName}. All Rights Reserved.</p>
+            <p>漏 {new Date().getFullYear()} {photographerName}. All Rights Reserved.</p>
             {stats && (
               <p>{stats.totalPhotos} Photos</p>
             )}
@@ -959,7 +1025,7 @@ const App: React.FC = () => {
           initialIndex={slideshowIndex}
           onClose={() => {
             setShowSlideshow(false);
-            setHomeIdleSeconds(0); // 关闭幻灯片后重置空闲计时
+            setHomeIdleSeconds(0); // 鍏抽棴骞荤伅鐗囧悗閲嶇疆绌洪棽璁℃椂
           }}
         />
       )}

@@ -40,6 +40,7 @@ export interface UseGalleryReturn {
   
   // Actions
   refresh: () => Promise<void>;
+  reload: () => Promise<void>;
   filterByCategory: (category: string) => void;
   addSource: (source: Parameters<typeof galleryApi.addSource>[0]) => Promise<void>;
   removeSource: (id: string) => Promise<void>;
@@ -441,6 +442,7 @@ export function useGallery(options: UseGalleryOptions = {}): UseGalleryReturn {
     
     // Actions
     refresh,
+    reload: loadFromApi,
     filterByCategory,
     addSource,
     removeSource,
