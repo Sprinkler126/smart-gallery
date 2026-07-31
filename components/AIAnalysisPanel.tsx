@@ -5,7 +5,7 @@ import {
   Brain, Settings, Search, Tag, Image, 
   BarChart3, Sparkles, Loader2, X, ChevronRight,
   Star, AlertCircle, CheckCircle, RefreshCw,
-  GripVertical, Plus, Trash2, Power, FlaskConical
+  GripVertical, Plus, Trash2, Power, FlaskConical, Download, PackageCheck
 } from 'lucide-react';
 
 interface AIAnalysisPanelProps {
@@ -20,6 +20,8 @@ interface AIConfig {
   model: string;
   enableAutoAnalysis: boolean;
   maxConcurrentAnalysis: number;
+  vectorSearchEnabled: boolean;
+  vectorSearchModelId: string;
   aiProviders: AIProviderConfig[];
 }
 
@@ -67,7 +69,7 @@ const buildProviderJson = (config: Pick<AIConfig, 'enableAutoAnalysis' | 'maxCon
   }, null, 2);
 
 const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allowSettings = false }) => {
-  const [activeTab, setActiveTab] = useState<'analysis' | 'settings' | 'stats' | 'search'>(photo ? 'analysis' : 'search');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'settings' | 'stats' | 'search' | 'dependencies'>(photo ? 'analysis' : 'search');
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +79,8 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
     model: 'multimodal-large',
     enableAutoAnalysis: false,
     maxConcurrentAnalysis: 2,
+    vectorSearchEnabled: false,
+    vectorSearchModelId: 'Xenova/multilingual-e5-small',
     aiProviders: []
   });
   const [stats, setStats] = useState<AnalysisStats | null>(null);
@@ -90,6 +94,11 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
   const [dragProviderId, setDragProviderId] = useState<string | null>(null);
   const [providerConfigJson, setProviderConfigJson] = useState('');
   const [providerConfigMessage, setProviderConfigMessage] = useState<{success: boolean; message: string} | null>(null);
+  const [dependencies, setDependencies] = useState<any | null>(null);
+  const [downloadingModel, setDownloadingModel] = useState(false);
+  const [downloadingLogoPack, setDownloadingLogoPack] = useState(false);
+  const [acceptLogoTerms, setAcceptLogoTerms] = useState(false);
+  const [dependencyError, setDependencyError] = useState('');
   
   // Batch analysis state
   const [batchProgress, setBatchProgress] = useState<{current: number; total: number; photoId?: string} | null>(null);
@@ -104,6 +113,10 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
       loadConfig();
     }
   }, [allowSettings]);
+
+  useEffect(() => {
+    void loadDependencies();
+  }, []);
 
   // Load analysis when photo changes
   useEffect(() => {
@@ -130,6 +143,8 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
           model: data.data.aiModel || 'multimodal-large',
           enableAutoAnalysis: data.data.enableAutoAnalysis || false,
           maxConcurrentAnalysis: data.data.maxConcurrentAnalysis || 2,
+          vectorSearchEnabled: data.data.vectorSearch?.enabled === true,
+          vectorSearchModelId: data.data.vectorSearch?.modelId || '',
           aiProviders: normalizeProviderOrder(data.data.aiProviders || [])
         };
         setConfig({
@@ -196,6 +211,8 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
           aiModel: config.model,
           enableAutoAnalysis: config.enableAutoAnalysis,
           maxConcurrentAnalysis: config.maxConcurrentAnalysis,
+          vectorSearchEnabled: config.vectorSearchEnabled,
+          vectorSearchModelId: config.vectorSearchModelId,
           aiProviders: orderedProviders
         })
       });
@@ -486,6 +503,64 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
     } finally {
       setSearching(false);
     }
+  };
+
+  const loadDependencies = async () => {
+    try {
+      const response = await fetch('/photowall/api/dependencies');
+      const data = await response.json();
+      if (data.success) setDependencies(data.data);
+    } catch (err) {
+      setDependencyError('无法读取依赖状态。');
+    }
+  };
+
+  const downloadVectorModel = async () => {
+    setDownloadingModel(true);
+    setDependencyError('');
+    try {
+      const response = await fetch('/photowall/api/dependencies/vector-model/download', { method: 'POST' });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || '模型下载失败。');
+      await loadDependencies();
+    } catch (err) {
+      setDependencyError(err instanceof Error ? err.message : '模型下载失败。');
+    } finally {
+      setDownloadingModel(false);
+    }
+  };
+
+  const downloadLogoPack = async () => {
+    setDownloadingLogoPack(true);
+    setDependencyError('');
+    try {
+      const response = await fetch('/photowall/api/dependencies/brand-logos/download', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acceptTerms: acceptLogoTerms })
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Logo 包下载失败。');
+      setDependencies((previous: any) => previous ? { ...previous, logoPack: data.data.status.logoPack } : previous);
+    } catch (err) {
+      setDependencyError(err instanceof Error ? err.message : 'Logo 包下载失败。');
+    } finally {
+      setDownloadingLogoPack(false);
+    }
+  };
+
+  const renderDependencies = () => {
+    const vector = dependencies?.vectorModel;
+    const logos = dependencies?.logoPack;
+    return <div className="space-y-4">
+      <div className="rounded-lg border border-white/10 bg-white/[.03] p-4">
+        <div className="flex items-start justify-between gap-3"><div><h3 className="font-medium text-white">中文语义检索模型</h3><p className="mt-1 text-xs leading-relaxed text-gray-500">模型仅在下载或启用向量检索后加载；未启用时不影响普通关键词搜索。</p></div><span className="rounded bg-white/5 px-2 py-1 text-xs text-gold">{vector?.state || 'unknown'}</span></div>
+        <p className="mt-3 break-all text-xs text-gray-400">{vector?.modelId || '未配置模型 ID'}</p>
+        <div className="mt-3 flex items-center justify-between text-xs text-gray-500"><span>已索引 {vector?.indexed || 0} 张，待处理 {vector?.queued || 0} 张</span><button onClick={() => void loadDependencies()} className="text-gray-300 hover:text-white">刷新状态</button></div>
+        <button onClick={() => void downloadVectorModel()} disabled={downloadingModel || !vector?.configured} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded bg-gold text-sm font-medium text-obsidian disabled:opacity-40">{downloadingModel ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>} {downloadingModel ? '正在下载模型…' : '下载/准备模型'}</button>
+        {vector?.error && <p className="mt-2 text-xs text-red-300">{vector.error}</p>}
+      </div>
+      <div className="rounded-lg border border-white/10 bg-white/[.03] p-4"><div className="flex items-center gap-2"><PackageCheck size={17} className="text-gold"/><h3 className="font-medium text-white">基础厂商 Logo 包</h3></div><p className="mt-2 text-xs leading-relaxed text-gray-500">Canon、Nikon、Sony、Fujifilm、Leica、DJI、Apple、小米等 16 个厂商 Logo 不随 Git 分发。用户主动下载后写入本机水印目录。</p><p className="mt-3 text-sm text-gray-300">已安装 {logos?.count || 0} / {(logos?.available || []).length}</p><p className="mt-1 break-words text-xs text-gray-500">{(logos?.logos || []).join(' · ') || '尚未下载 Logo 文件'}</p><label className="mt-4 flex items-start gap-2 text-xs text-gray-400"><input type="checkbox" checked={acceptLogoTerms} onChange={event => setAcceptLogoTerms(event.target.checked)} className="mt-0.5 accent-gold"/><span>我已阅读并同意 <a href={logos?.termsUrl || 'https://worldvectorlogo.com/about'} target="_blank" rel="noreferrer" className="text-gold underline">WorldVectorLogo 使用条款</a>，并自行承担商标和版权合规责任。</span></label><button onClick={() => void downloadLogoPack()} disabled={downloadingLogoPack || !acceptLogoTerms || !(logos?.missing || []).length} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded bg-white/10 text-sm text-gray-100 hover:bg-white/15 disabled:opacity-40">{downloadingLogoPack ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>} {downloadingLogoPack ? '正在下载 Logo 包…' : (logos?.missing || []).length ? `下载缺失 Logo（${logos.missing.length}）` : '基础 Logo 包已完整'}</button><p className="mt-2 text-xs text-gray-500">{logos?.apiKeyConfigured ? '已配置 WorldVectorLogo API Key。' : '未配置 API Key 时受来源站匿名每日限额影响。'}</p></div>
+      {dependencyError && <p className="rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{dependencyError}</p>}
+    </div>;
   };
 
   const clearCache = async () => {
@@ -870,6 +945,27 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
             className="w-24 bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-gold"
           />
         </div>
+
+        <label className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+          <input
+            type="checkbox"
+            checked={config.vectorSearchEnabled}
+            onChange={(e) => setConfig({ ...config, vectorSearchEnabled: e.target.checked })}
+            className="w-4 h-4 rounded border-white/20 bg-white/5 text-gold"
+          />
+          <span className="text-sm text-gray-300">Enable optional vector search</span>
+        </label>
+      </div>
+
+      <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+        <label className="block text-xs text-gray-500 mb-2">Vector model ID</label>
+        <input
+          value={config.vectorSearchModelId}
+          onChange={(e) => setConfig({ ...config, vectorSearchModelId: e.target.value })}
+          placeholder="Xenova/multilingual-e5-small"
+          className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gold"
+        />
+        <p className="mt-2 text-xs text-gray-500">Disabled by default. If the model is unavailable, search automatically falls back to keyword matching.</p>
       </div>
 
       <div className="space-y-3">
@@ -1250,6 +1346,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
             { id: 'analysis', label: 'Analysis', icon: Sparkles },
             ...(photo ? [] : [{ id: 'search', label: 'Search', icon: Search }]),
             ...(photo ? [] : [{ id: 'stats', label: 'Stats', icon: BarChart3 }]),
+            { id: 'dependencies', label: '依赖', icon: Download },
             ...(allowSettings ? [{ id: 'settings', label: 'Settings', icon: Settings }] : []),
           ].map((tab) => (
             <button
@@ -1273,6 +1370,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
           {allowSettings && activeTab === 'settings' && renderSettings()}
           {!photo && activeTab === 'stats' && renderStats()}
           {!photo && activeTab === 'search' && renderSearch()}
+          {activeTab === 'dependencies' && renderDependencies()}
         </div>
       </div>
     </div>

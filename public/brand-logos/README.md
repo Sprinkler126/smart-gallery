@@ -2,7 +2,7 @@
 
 Put optional camera or device brand logos here. The EXIF frame generator checks this folder before falling back to text-only brand rendering.
 
-Recommended source: https://worldvectorlogo.com/
+The app exposes a user-initiated base-pack download from the public Dependencies tab. It downloads the approved manufacturer list from https://worldvectorlogo.com/ into this local directory.
 
 Naming convention:
 
@@ -15,4 +15,4 @@ Naming convention:
 
 Supported formats: `svg`, `png`, `jpg`, `jpeg`, `webp`.
 
-Keep trademark and licensing terms in mind. WorldVectorLogo states that website content is for personal, non-commercial use unless otherwise stated, so this project intentionally does not bundle or scrape logos.
+Logo files remain ignored by Git. Before downloading, users must accept WorldVectorLogo's terms and remain responsible for trademark and copyright compliance.

@@ -248,12 +248,12 @@ export class ExifFrameService {
     };
   }
 
-  async buildLogoComposite(fields, template, left, top, width, height) {
-    const logoPath = this.getLogoPath(fields.brandSlug);
-    if (!logoPath) return null;
+  async buildLogoComposite(fields, template, left, top, width, height, customLogoBuffer = null) {
+    const logoPath = customLogoBuffer ? null : this.getLogoPath(fields.brandSlug);
+    if (!customLogoBuffer && !logoPath) return null;
 
     try {
-      const buffer = await sharp(logoPath)
+      const buffer = await sharp(customLogoBuffer || logoPath)
         .resize(width, height, { fit: 'inside', withoutEnlargement: true })
         .png()
         .toBuffer();
@@ -385,7 +385,7 @@ export class ExifFrameService {
     `);
   }
 
-  async createFrame({ photoId, templateId = 'classic-white', overrides = {}, width = 1800 } = {}) {
+  async createFrame({ photoId, templateId = 'classic-white', overrides = {}, width = 1800, customLogoBuffer = null } = {}) {
     const photo = this.galleryService.getPhoto(photoId);
     if (!photo) throw new Error('Photo not found');
     if (!photo.originalPath || !await fs.pathExists(photo.originalPath)) {
@@ -482,7 +482,8 @@ export class ExifFrameService {
         glassPanelX + glassPad,
         glassTextTop + Math.round(glassTextHeight * 0.08),
         glassLogoWidth,
-        glassLogoHeight
+        glassLogoHeight,
+        customLogoBuffer
       );
       composites.push(logoComposite || this.buildBrandTextComposite(fields.brand, template, glassPanelX + glassPad, glassTextTop, glassLogoWidth, glassLogoHeight));
     } else if (layout === 'top-header') {
@@ -490,7 +491,7 @@ export class ExifFrameService {
       const headerLogoHeight = Math.round(headerHeight * 0.58);
       const headerLogoTop = outerPadding + Math.round(headerHeight * 0.18);
       const headerTextLeft = outerPadding + headerLogoWidth + Math.round(canvasWidth * 0.04);
-      const headerLogo = await this.buildLogoComposite(fields, template, outerPadding, headerLogoTop, headerLogoWidth, headerLogoHeight);
+      const headerLogo = await this.buildLogoComposite(fields, template, outerPadding, headerLogoTop, headerLogoWidth, headerLogoHeight, customLogoBuffer);
       composites.push(headerLogo || this.buildBrandTextComposite(fields.brand, template, outerPadding, headerLogoTop, headerLogoWidth, headerLogoHeight));
       composites.push({
         input: this.buildHeaderSvg(fields, template, canvasWidth - headerTextLeft - outerPadding, headerHeight),
@@ -506,7 +507,7 @@ export class ExifFrameService {
       const railLeft = imageLeft + imageWidth + outerPadding;
       const railWidth = Math.max(260, canvasWidth - railLeft - outerPadding);
       const railLogoHeight = Math.round(canvasHeight * 0.14);
-      const railLogo = await this.buildLogoComposite(fields, template, railLeft, imageTop, railWidth, railLogoHeight);
+      const railLogo = await this.buildLogoComposite(fields, template, railLeft, imageTop, railWidth, railLogoHeight, customLogoBuffer);
       composites.push(railLogo || this.buildBrandTextComposite(fields.brand, template, railLeft, imageTop, railWidth, railLogoHeight));
       composites.push({
         input: this.buildRailTextSvg(fields, template, railWidth, Math.max(360, imageHeight - railLogoHeight - outerPadding)),
@@ -517,7 +518,7 @@ export class ExifFrameService {
       const centerLogoWidth = Math.round(footerInnerWidth * 0.24);
       const centerLogoHeight = Math.round(footerHeight * 0.36);
       const centerLogoLeft = Math.round((canvasWidth - centerLogoWidth) / 2);
-      const centerLogo = await this.buildLogoComposite(fields, template, centerLogoLeft, footerTop, centerLogoWidth, centerLogoHeight);
+      const centerLogo = await this.buildLogoComposite(fields, template, centerLogoLeft, footerTop, centerLogoWidth, centerLogoHeight, customLogoBuffer);
       composites.push(centerLogo || this.buildBrandTextComposite(fields.brand, template, centerLogoLeft, footerTop, centerLogoWidth, centerLogoHeight));
       composites.push({
         input: this.buildCenterTextSvg(fields, template, footerInnerWidth, Math.max(190, footerHeight - centerLogoHeight), template.id),
@@ -536,7 +537,8 @@ export class ExifFrameService {
         outerPadding,
         footerTop + Math.round(textHeight * 0.08),
         logoWidth,
-        logoHeight
+        logoHeight,
+        customLogoBuffer
       );
       composites.push(logoComposite || this.buildBrandTextComposite(fields.brand, template, outerPadding, footerTop, logoWidth, logoHeight));
     }
@@ -576,7 +578,7 @@ export class ExifFrameService {
       template: { id: template.id, name: template.name },
       fields,
       size: { width: canvasWidth, height: canvasHeight },
-      logoUsed: Boolean(this.getLogoPath(fields.brandSlug))
+      logoUsed: Boolean(customLogoBuffer || this.getLogoPath(fields.brandSlug))
     };
   }
 

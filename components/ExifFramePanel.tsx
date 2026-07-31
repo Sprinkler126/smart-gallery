@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, Image as ImageIcon, Loader2, X } from 'lucide-react';
+import { Download, Image as ImageIcon, Loader2, Upload, X } from 'lucide-react';
 import { Photo } from '../types';
-import { adminFetch } from '../services/adminAuth';
 
 interface ExifFramePanelProps {
   photo: Photo;
@@ -37,6 +36,11 @@ interface LogoInfo {
   directory?: string;
 }
 
+interface ServerLogo {
+  brand: string;
+  slug: string;
+}
+
 const EMPTY_FIELDS: ExifFields = {
   brand: '',
   brandSlug: '',
@@ -69,6 +73,9 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
   const [templateId, setTemplateId] = useState('classic-white');
   const [fields, setFields] = useState<ExifFields>(EMPTY_FIELDS);
   const [logo, setLogo] = useState<LogoInfo>({ available: false });
+  const [serverLogos, setServerLogos] = useState<ServerLogo[]>([]);
+  const [customLogoDataUrl, setCustomLogoDataUrl] = useState('');
+  const [customLogoName, setCustomLogoName] = useState('');
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
@@ -81,9 +88,12 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
       setLoading(true);
       setError('');
       try {
-        const response = await fetch(`/photowall/api/exif-frame/${photo.id}`);
-        const json = await response.json();
-        if (!response.ok || !json.success) {
+        const [previewResponse, dependenciesResponse] = await Promise.all([
+          fetch(`/photowall/api/exif-frame/${photo.id}`),
+          fetch('/photowall/api/dependencies')
+        ]);
+        const json = await previewResponse.json();
+        if (!previewResponse.ok || !json.success) {
           throw new Error(json.error || 'Failed to load EXIF frame data');
         }
         if (cancelled) return;
@@ -91,6 +101,10 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
         setLogo(json.data.logo || { available: false });
         setTemplates(json.data.templates || []);
         if (json.data.templates?.[0]?.id) setTemplateId(json.data.templates[0].id);
+        if (dependenciesResponse.ok) {
+          const dependencies = await dependenciesResponse.json();
+          setServerLogos(dependencies.data?.logoPack?.available || []);
+        }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       } finally {
@@ -127,17 +141,41 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
     link.remove();
   };
 
+  const handleCustomLogoUpload = (file?: File) => {
+    if (!file) return;
+    const allowedTypes = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setError('自定义水印仅支持 SVG、PNG、JPEG 或 WebP。');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('自定义水印不能超过 2MB。');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') return;
+      setCustomLogoDataUrl(reader.result);
+      setCustomLogoName(file.name);
+      setError('');
+      setResultUrl('');
+    };
+    reader.onerror = () => setError('无法读取自定义水印文件。');
+    reader.readAsDataURL(file);
+  };
+
   const generateFrame = async () => {
     setGenerating(true);
     setError('');
     try {
-      const response = await adminFetch(`/photowall/api/exif-frame/${photo.id}`, {
+      const response = await fetch(`/photowall/api/exif-frame/${photo.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templateId,
           width: 1800,
-          overrides: fields
+          overrides: fields,
+          customLogoDataUrl: customLogoDataUrl || undefined
         })
       });
       const json = await response.json();
@@ -277,10 +315,52 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                 <div>
                   <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-300">品牌与 Logo</h3>
                   <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                    {logo.available
+                    {customLogoDataUrl
+                      ? `本次将使用你上传的 ${customLogoName}；文件不会保存到服务器。`
+                      : logo.available
                       ? `已匹配 ${logo.filename}，生成时会优先使用目录中的 logo。`
-                      : `未找到 logo，将使用文字品牌。可把 ${logo.expectedNames?.join(' / ') || 'brand.svg'} 放入 ${logo.directory || './public/brand-logos'}。`}
+                      : '可选择服务器已安装的 Logo，或上传本次专用水印；没有匹配时将使用文字品牌。'}
                   </p>
+                </div>
+                <label className="block space-y-1">
+                  <span className="text-xs text-gray-500">服务器现有 Logo</span>
+                  <select
+                    value={customLogoDataUrl ? '' : fields.brand}
+                    onChange={(event) => {
+                      setCustomLogoDataUrl('');
+                      setCustomLogoName('');
+                      updateField('brand', event.target.value);
+                    }}
+                    className="w-full rounded-md bg-black/30 border border-white/10 px-3 py-2 text-sm text-white outline-none focus:border-gold"
+                  >
+                    <option value="">按相机品牌自动匹配</option>
+                    {serverLogos.map(item => <option key={item.slug} value={item.brand}>{item.brand}</option>)}
+                  </select>
+                </label>
+                <div className="rounded-md border border-dashed border-white/15 bg-white/[0.02] p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-gray-400">上传自定义水印（仅本次生成）</span>
+                    {customLogoDataUrl && (
+                      <button
+                        type="button"
+                        onClick={() => { setCustomLogoDataUrl(''); setCustomLogoName(''); setResultUrl(''); }}
+                        className="text-xs text-gray-400 hover:text-white underline underline-offset-4"
+                      >
+                        移除
+                      </button>
+                    )}
+                  </div>
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md bg-white/5 px-3 py-2 text-sm text-gray-200 hover:bg-white/10">
+                    <Upload size={16} />
+                    {customLogoName || '选择 SVG、PNG、JPEG 或 WebP'}
+                    <input
+                      type="file"
+                      accept="image/svg+xml,image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(event) => handleCustomLogoUpload(event.target.files?.[0])}
+                    />
+                  </label>
+                  <p className="text-xs text-gray-500">最大 2MB。上传内容只随当前请求处理，不会写入服务器 Logo 库。</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
                   {([

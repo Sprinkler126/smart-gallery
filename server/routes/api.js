@@ -14,10 +14,10 @@ import { ExifFrameService } from '../services/exifFrameService.js';
 // Use native fetch (Node.js 18+)
 const fetch = globalThis.fetch || (await import('node-fetch')).default;
 
-export function createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config) {
+export function createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config, authService) {
   const router = Router();
-  const adminToken = process.env.ADMIN_TOKEN || config.adminToken || '';
   const resetJobs = new Map();
+  const loginAttempts = new Map();
   const creativeService = new CreativeService({
     galleryService,
     aiAnalysisService,
@@ -30,52 +30,119 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
     baseDir: process.cwd()
   });
 
-  const getHostName = (value = '') => {
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-    try {
-      return new URL(trimmed).hostname;
-    } catch {
-      return trimmed.split(':')[0].replace(/^\[|\]$/g, '');
-    }
+  const withTimeout = (promise, timeoutMs) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Vector search timed out')), timeoutMs))
+  ]);
+
+  const fuseSearchResults = (query, lexicalResults, vectorResults, photos) => {
+    const photoById = new Map(photos.map(photo => [photo.id, photo]));
+    const analysisById = new Map([...aiAnalysisService.cache.values()].map(analysis => [analysis.photoId, analysis]));
+    const lexicalById = new Map(lexicalResults.map((result, index) => [result.photo.id, { ...result, rank: index + 1 }]));
+    const vectorById = new Map(vectorResults.map((result, index) => [result.photoId, { ...result, rank: index + 1 }]));
+    const ids = new Set([...lexicalById.keys(), ...vectorById.keys()]);
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return [...ids].map(photoId => {
+      const lexical = lexicalById.get(photoId);
+      const vector = vectorById.get(photoId);
+      const photo = photoById.get(photoId);
+      const analysis = lexical?.analysis || analysisById.get(photoId);
+      if (!photo || !analysis) return null;
+      const tags = (analysis.tags || []).map(tag => String(tag).toLowerCase());
+      const exactTag = tags.includes(normalizedQuery);
+      const exactPhrase = [analysis.description, analysis.category, photo.title, photo.location].filter(Boolean).some(value => String(value).toLowerCase().includes(normalizedQuery));
+      const rrf = (lexical ? 1 / (60 + lexical.rank) : 0) + (vector ? 1 / (60 + vector.rank) : 0);
+      const relevanceScore = rrf + (exactTag ? 1 : 0) + (exactPhrase ? 0.2 : 0);
+      return {
+        photo,
+        analysis,
+        relevanceScore,
+        matchedFields: lexical?.matchedFields || [],
+        semanticScore: vector?.similarity ?? null,
+        exactMatch: exactTag || exactPhrase
+      };
+    }).filter(Boolean).sort((a, b) => b.relevanceScore - a.relevanceScore);
   };
 
-  const isLocalOrPrivateHost = (hostname) => {
-    const host = (hostname || '').toLowerCase();
-    if (!host) return false;
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
-    if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
-    const match = host.match(/^172\.(\d+)\./);
-    return !!match && Number(match[1]) >= 16 && Number(match[1]) <= 31;
+  const getDependencyStatus = async () => {
+    const logoDir = path.resolve('./public/brand-logos');
+    const logoFiles = await fs.readdir(logoDir).catch(() => []);
+    const logos = logoFiles.filter(name => /\.(svg|png|jpe?g|webp)$/i.test(name)).sort();
+    return {
+      vectorModel: vectorSearchService.getStatus(),
+      logoPack: {
+        source: 'WorldVectorLogo',
+        termsUrl: 'https://worldvectorlogo.com/about',
+        apiKeyConfigured: Boolean(process.env.WORLD_VECTOR_LOGO_API_KEY),
+        count: logos.length,
+        logos,
+        missing: BRAND_LOGO_PACK.filter(item => !logos.includes(`${item.slug}.svg`)).map(item => item.slug),
+        available: BRAND_LOGO_PACK.filter(item => logos.includes(`${item.slug}.svg`)).map(item => ({ brand: item.brand, slug: item.slug }))
+      }
+    };
   };
 
-  const isAdminRequest = (req) => {
-    const suppliedToken =
-      req.get('x-admin-token') ||
-      (req.get('authorization') || '').replace(/^Bearer\s+/i, '') ||
-      req.query.adminToken ||
-      '';
+  const parseCustomLogo = (dataUrl) => {
+    if (!dataUrl) return null;
+    const match = /^data:image\/(svg\+xml|png|jpeg|webp);base64,([a-z0-9+/=]+)$/i.exec(dataUrl);
+    if (!match) throw new Error('自定义 Logo 必须是 SVG、PNG、JPEG 或 WebP 图片。');
+    const buffer = Buffer.from(match[2], 'base64');
+    if (!buffer.length || buffer.length > 2 * 1024 * 1024) throw new Error('自定义 Logo 不能为空且不能超过 2MB。');
+    if (match[1].toLowerCase() === 'svg+xml' && !buffer.toString('utf8', 0, 256).includes('<svg')) throw new Error('SVG Logo 内容无效。');
+    return buffer;
+  };
 
-    if (adminToken && suppliedToken === adminToken) {
-      return true;
+  const BRAND_LOGO_PACK = [
+    ['Canon', 'canon-2'], ['Nikon', 'nikon'], ['Sony', 'sony'], ['Fujifilm', 'fujifilm'],
+    ['Leica', 'leica'], ['Panasonic', 'panasonic'], ['Olympus', 'olympus'], ['DJI', 'dji'],
+    ['Apple', 'apple'], ['Xiaomi', 'xiaomi'], ['Huawei', 'huawei'], ['Samsung', 'samsung'],
+    ['GoPro', 'gopro'], ['Ricoh', 'ricoh'], ['Pentax', 'pentax'], ['Sigma', 'sigma']
+  ].map(([brand, sourceSlug]) => ({ brand, slug: brand.toLowerCase().replace(/[^a-z0-9]+/g, '-'), sourceSlug }));
+  let logoDownloadPromise = null;
+
+  const downloadBrandLogoPack = async () => {
+    const logoDir = path.resolve('./public/brand-logos');
+    await fs.ensureDir(logoDir);
+    const results = [];
+    for (const item of BRAND_LOGO_PACK) {
+      const outputPath = path.join(logoDir, `${item.slug}.svg`);
+      if (await fs.pathExists(outputPath)) { results.push({ ...item, status: 'already_installed' }); continue; }
+      try {
+        const headers = { Accept: 'application/json' };
+        if (process.env.WORLD_VECTOR_LOGO_API_KEY) headers.Authorization = `Bearer ${process.env.WORLD_VECTOR_LOGO_API_KEY}`;
+        const response = await fetch(`https://worldvectorlogo.com/api/v1/logos/${encodeURIComponent(item.sourceSlug)}`, { headers });
+        if (!response.ok) throw new Error(`source returned ${response.status}`);
+        const payload = await response.json();
+        const svg = payload?.data?.svg_content || payload?.svg_content;
+        if (typeof svg !== 'string' || !svg.trimStart().startsWith('<svg') || svg.length > 5_000_000) throw new Error('source did not return a valid SVG');
+        await fs.writeFile(outputPath, svg, 'utf8');
+        results.push({ ...item, status: 'downloaded' });
+      } catch (error) {
+        results.push({ ...item, status: 'failed', error: error.message });
+      }
     }
-
-    const originHost = getHostName(req.get('origin') || req.get('referer') || '');
-    const requestHost = getHostName(req.get('host') || '');
-    return isLocalOrPrivateHost(originHost || requestHost);
+    return results;
   };
 
   const requireAdmin = (req, res, next) => {
-    if (isAdminRequest(req)) {
+    if (authService.getSession(req)) {
       return next();
     }
-
-    return res.status(403).json({
+    return res.status(401).json({
       success: false,
-      error: adminToken
-        ? 'Admin token required'
-        : 'Admin access is restricted to local/private hosts. Set ADMIN_TOKEN to allow authorized remote admin requests.'
+      error: authService.isConfigured() ? 'Admin authentication required' : '管理员认证尚未在此服务器初始化。'
     });
+  };
+
+  const takeLoginAttempt = (req) => {
+    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const attempts = (loginAttempts.get(key) || []).filter(timestamp => now - timestamp < 15 * 60 * 1000);
+    if (attempts.length >= 5) return false;
+    attempts.push(now);
+    loginAttempts.set(key, attempts);
+    return true;
   };
 
   const serializeResetJob = (job) => ({
@@ -165,6 +232,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
     if (updates.aiModel !== undefined) config.aiModel = updates.aiModel;
     if (updates.enableAutoAnalysis !== undefined) config.enableAutoAnalysis = updates.enableAutoAnalysis;
     if (updates.maxConcurrentAnalysis !== undefined) config.maxConcurrentAnalysis = updates.maxConcurrentAnalysis;
+    if (updates.vectorSearchEnabled !== undefined) config.vectorSearch = { ...(config.vectorSearch || {}), enabled: updates.vectorSearchEnabled === true };
+    if (updates.vectorSearchModelId !== undefined) config.vectorSearch = { ...(config.vectorSearch || {}), modelId: updates.vectorSearchModelId };
     if (updates.aiProviders !== undefined || updates.providers !== undefined) {
       config.aiProviders = normalizeImportedProviders(updates.aiProviders || updates.providers || []);
     }
@@ -177,12 +246,71 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       maxConcurrentAnalysis: config.maxConcurrentAnalysis,
       aiProviders: config.aiProviders || []
     });
+    vectorSearchService.updateRuntimeConfig(config.vectorSearch || {});
+    if (vectorSearchService.isEnabled()) vectorSearchService.scheduleBatch([...aiAnalysisService.cache.values()]);
 
     const configPath = path.resolve('./server/config.json');
     await fs.writeJson(configPath, config, { spaces: 2 });
   };
 
   // ==================== PHOTOS ====================
+
+  router.get('/auth/session', (req, res) => {
+    const session = authService.getSession(req);
+    res.json({ success: true, data: { authenticated: Boolean(session), role: session?.role || 'visitor' } });
+  });
+
+  router.post('/auth/login', async (req, res) => {
+    if (!authService.isConfigured()) return res.status(503).json({ success: false, error: '管理员认证尚未初始化。' });
+    if (!takeLoginAttempt(req)) return res.status(429).json({ success: false, error: '登录尝试过多，请 15 分钟后重试。' });
+    try {
+      const passwordValid = await authService.verifyPassword(req.body?.password);
+      const totpValid = passwordValid && authService.verifyTotp(req.body?.code);
+      if (!totpValid) return res.status(401).json({ success: false, error: '密码或动态验证码错误。' });
+      authService.setSessionCookie(req, res, authService.createSession());
+      loginAttempts.delete(req.ip || req.socket.remoteAddress || 'unknown');
+      res.json({ success: true, data: { authenticated: true, role: 'admin' } });
+    } catch (error) {
+      console.error('Admin login failed:', error.message);
+      res.status(500).json({ success: false, error: '管理员登录不可用。' });
+    }
+  });
+
+  router.post('/auth/logout', (req, res) => {
+    authService.clearSessionCookie(req, res);
+    res.json({ success: true });
+  });
+
+  // Public dependency status and download endpoints. The model ID is server-configured;
+  // callers cannot supply arbitrary URLs or package names.
+  router.get('/dependencies', async (_req, res) => {
+    res.json({ success: true, data: await getDependencyStatus() });
+  });
+
+  router.post('/dependencies/vector-model/download', async (_req, res) => {
+    try {
+      const status = await vectorSearchService.downloadModel();
+      res.json({ success: true, data: status });
+    } catch (error) {
+      res.status(503).json({ success: false, error: error.message, data: vectorSearchService.getStatus() });
+    }
+  });
+
+  router.post('/dependencies/brand-logos/download', async (req, res) => {
+    if (req.body?.acceptTerms !== true) {
+      return res.status(400).json({ success: false, error: '请先确认 WorldVectorLogo 的商标与使用条款。' });
+    }
+    try {
+      if (!logoDownloadPromise) logoDownloadPromise = downloadBrandLogoPack();
+      const results = await logoDownloadPromise;
+      const status = await getDependencyStatus();
+      res.json({ success: true, data: { results, status } });
+    } catch (error) {
+      res.status(503).json({ success: false, error: error.message });
+    } finally {
+      logoDownloadPromise = null;
+    }
+  });
 
   /**
    * GET /api/photos
@@ -774,7 +902,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
           aiModel: config.aiModel || 'multimodal-large',
           enableAutoAnalysis: config.enableAutoAnalysis || false,
           maxConcurrentAnalysis: config.maxConcurrentAnalysis || 2,
-          aiProviders: aiAnalysisService.getSafeProviders()
+          aiProviders: aiAnalysisService.getSafeProviders(),
+          vectorSearch: vectorSearchService.getStatus()
         }
       });
     } catch (error) {
@@ -1068,13 +1197,14 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
     }
   });
 
-  router.post('/exif-frame/:id', requireAdmin, async (req, res) => {
+  router.post('/exif-frame/:id', async (req, res) => {
     try {
       const result = await exifFrameService.createFrame({
         photoId: req.params.id,
         templateId: req.body?.templateId,
         overrides: req.body?.overrides || {},
-        width: req.body?.width
+        width: req.body?.width,
+        customLogoBuffer: parseCustomLogo(req.body?.customLogoDataUrl)
       });
       res.json({ success: true, data: result });
     } catch (error) {
@@ -1214,12 +1344,35 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       }
 
       const allPhotos = galleryService.getPhotos({}).photos;
-      const results = await aiAnalysisService.searchByQuery(query, allPhotos);
+      const lexicalResults = await aiAnalysisService.searchByQuery(query, allPhotos);
+      let results = lexicalResults;
+      let searchMode = 'lexical';
+      let vectorStatus = vectorSearchService.getStatus();
+
+      if (vectorStatus.enabled) {
+        vectorSearchService.scheduleBatch([...aiAnalysisService.cache.values()]);
+        try {
+          const vectorResults = await withTimeout(
+            vectorSearchService.search(query, 100),
+            config.vectorSearch?.timeoutMs || 600
+          );
+          if (vectorResults.length > 0) {
+            results = fuseSearchResults(query, lexicalResults, vectorResults, allPhotos);
+            searchMode = 'hybrid';
+          }
+        } catch (error) {
+          console.warn(`Vector search fallback: ${error.message}`);
+          searchMode = 'lexical_fallback';
+        }
+        vectorStatus = vectorSearchService.getStatus();
+      }
 
       res.json({
         success: true,
         query,
         total: results.length,
+        searchMode,
+        vectorSearch: vectorStatus,
         data: results.map(r => ({
           photo: {
             id: r.photo.id,
@@ -1237,7 +1390,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
             description: r.analysis.description
           },
           relevanceScore: r.relevanceScore,
-          matchedFields: r.matchedFields || []
+          matchedFields: r.matchedFields || [],
+          semanticScore: r.semanticScore ?? null
         }))
       });
     } catch (error) {
@@ -1520,6 +1674,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
 
       const force = req.query.force === 'true';
       const analysis = await aiAnalysisService.analyzeImage(photo, force);
+      vectorSearchService.scheduleIndex(analysis);
       
       res.json({
         success: true,

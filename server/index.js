@@ -17,6 +17,7 @@ import { GalleryService } from './services/galleryService.js';
 import { AIAnalysisService } from './services/aiAnalysisService.js';
 import { VectorSearchService } from './services/vectorSearchService.js';
 import { DatabaseService } from './services/databaseService.js';
+import { AuthService } from './services/authService.js';
 import { createApiRouter } from './routes/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -94,6 +95,7 @@ console.log(`   AI Model: ${config.aiModel || 'not set'} ${process.env.AI_MODEL 
 
 // Create Express app
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 
 // Create Socket.IO server for real-time updates
@@ -117,6 +119,7 @@ const aiAnalysisService = new AIAnalysisService(config, databaseService);
 
 // Initialize Vector Search Service
 const vectorSearchService = new VectorSearchService(config);
+const authService = new AuthService();
 
 // Log AI analysis status
 if (aiAnalysisService.isAvailable()) {
@@ -158,6 +161,7 @@ galleryService.on('photoAdded', (photo) => {
       });
     },
     onComplete: (queuedPhoto, analysis) => {
+      vectorSearchService.scheduleIndex(analysis);
       io.emit('analysis:auto:complete', {
         photoId: queuedPhoto.id,
         title: queuedPhoto.title,
@@ -224,7 +228,7 @@ galleryService.on('refreshComplete', () => {
 // Middleware
 app.use(cors());
 app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -239,7 +243,7 @@ app.use((req, res, next) => {
 });
 
 // API Routes - mounted at /photowall/api
-app.use('/photowall/api', createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config));
+app.use('/photowall/api', createApiRouter(galleryService, aiAnalysisService, vectorSearchService, config, authService));
 
 // Serve static files from dist (built frontend) at /photowall
 const distPath = path.join(__dirname, '../dist');
@@ -263,34 +267,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-const adminToken = process.env.ADMIN_TOKEN || config.adminToken || '';
-const getHostName = (value = '') => {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  try {
-    return new URL(trimmed).hostname;
-  } catch {
-    return trimmed.split(':')[0].replace(/^\[|\]$/g, '');
-  }
-};
-const isLocalOrPrivateHost = (hostname) => {
-  const host = (hostname || '').toLowerCase();
-  if (!host) return false;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
-  if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
-  const match = host.match(/^172\.(\d+)\./);
-  return !!match && Number(match[1]) >= 16 && Number(match[1]) <= 31;
-};
 const isAdminSocket = (socket) => {
-  const suppliedToken =
-    socket.handshake.auth?.adminToken ||
-    socket.handshake.headers['x-admin-token'] ||
-    '';
-  if (adminToken && suppliedToken === adminToken) return true;
-
-  const originHost = getHostName(socket.handshake.headers.origin || '');
-  const requestHost = getHostName(socket.handshake.headers.host || '');
-  return isLocalOrPrivateHost(originHost || requestHost);
+  return Boolean(authService.getSessionFromHeaders(socket.handshake.headers));
 };
 
 // Socket.IO connection handling

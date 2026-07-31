@@ -307,25 +307,17 @@ ngrok http 3001
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
 ```
 
-### 2. 添加访问认证（可选）
+### 2. 管理员认证（密码 + Google Authenticator）
 
-编辑 `server/index.js`，添加基本认证：
+不要手工修改 `server/index.js` 或使用 Basic Auth。在部署机、配置 HTTPS 后执行一次：
 
-```javascript
-// 在文件开头添加
-import basicAuth from 'express-basic-auth';
-
-// 在 app.use(cors()) 后添加
-app.use('/api/sources', basicAuth({
-  users: { 'admin': '你的密码' },
-  challenge: true
-}));
-```
-
-安装依赖：
 ```bash
-npm install express-basic-auth
+npm run auth:init -- --write-env
 ```
+
+命令会在部署机终端生成二维码；用 Google Authenticator 扫描后，将 `.env` 保留在部署机。该文件包含密码哈希、TOTP 密钥和会话密钥，不能提交到 Git、不能复制到开发机。之后管理员须用密码和动态码登录，远端登录后可使用全部管理功能。
+
+如需更换手机或怀疑密钥泄露，在部署机重新执行初始化命令并重启服务；旧会话将失效。
 
 ### 3. HTTPS 配置（使用 Cloudflare）
 

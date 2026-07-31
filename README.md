@@ -51,7 +51,7 @@
 
 ### 管理与保护
 - 本地/内网访问时显示管理入口，支持刷新、重扫、添加/移除照片源、重建缓存。
-- 可用 `ADMIN_TOKEN` 保护远程管理写操作。
+- 管理员功能使用部署机初始化的密码与 TOTP 动态码认证。
 - 禁用图片右键保存、拖拽和常见保存快捷键，降低误下载风险。
 - WebSocket 实时同步照片变化。
 
@@ -87,7 +87,9 @@ cp .env.example .env
 | `AI_API_ENDPOINT` | AI 服务的 OpenAI-compatible 接口地址 |
 | `AI_API_KEY` | AI 服务密钥，不要提交到 Git |
 | `AI_MODEL` | 使用的模型名称 |
-| `ADMIN_TOKEN` | 可选，远程管理写操作令牌 |
+| `AUTH_PASSWORD_HASH` | 部署机初始化生成的管理员密码哈希 |
+| `AUTH_TOTP_SECRET` | Google Authenticator 的 TOTP 密钥，仅保存在部署机 |
+| `AUTH_SESSION_SECRET` | 服务端会话签名密钥 |
 | `PORT` | 可选，后端端口，默认 `3001` |
 | `HOST` | 可选，后端监听地址，默认 `0.0.0.0` |
 
@@ -246,7 +248,7 @@ cloudflared tunnel run photowall
 ### 注意事项
 - `.env` 已被 `.gitignore` 忽略，AI Key、GitHub Token 等敏感信息不要写进 README 或提交记录。
 - `server/config.json` 中的本地照片路径需要按部署机器实际路径调整。
-- 如果远程开放管理能力，建议设置 `ADMIN_TOKEN`。
+- 远程开放管理能力前，请在部署机执行 `npm run auth:init -- --write-env` 并配置 HTTPS。
 
 ---
 

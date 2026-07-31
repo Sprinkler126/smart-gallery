@@ -41,5 +41,12 @@
   "aiApiKey": "",
   "aiModel": "",
   "enableAutoAnalysis": true,
-  "aiCacheDir": "./cache/analysis"
+  "aiCacheDir": "./cache/analysis",
+  "vectorSearch": {
+    "enabled": false,
+    "modelId": "Xenova/multilingual-e5-small",
+    "minScore": 0.35,
+    "timeoutMs": 600
+  },
+  "_WORLD_VECTOR_LOGO_API_KEY": "Optional: set WORLD_VECTOR_LOGO_API_KEY environment variable for WorldVectorLogo batch downloads above the anonymous daily limit"
 }

@@ -1,307 +1,175 @@
-/**
- * Vector Search Service
- * Lightweight local semantic search using TensorFlow.js
- * 
- * Approach:
- * 1. Use AI-generated tags, description, category as text
- * 2. Generate embeddings using Universal Sentence Encoder (lightweight)
- * 3. Store vectors locally
- * 4. Search using cosine similarity
- */
-
+import crypto from 'crypto';
 import fs from 'fs-extra';
 import path from 'path';
-import crypto from 'crypto';
+
+const DEFAULT_CONFIG = {
+  enabled: false,
+  modelId: 'Xenova/multilingual-e5-small',
+  cacheDir: './server/cache/vectors',
+  minScore: 0.35,
+};
+
+const hashText = (text) => crypto.createHash('sha256').update(text).digest('hex');
 
 export class VectorSearchService {
   constructor(config = {}) {
-    this.config = {
-      cacheDir: config.vectorCacheDir || './server/cache/vectors',
-      ...config
-    };
-    
-    this.vectors = new Map(); // photoId -> { vector, metadata }
-    this.model = null; // TensorFlow model
-    this.tf = null; // TensorFlow library
-    
+    this.config = { ...DEFAULT_CONFIG, ...(config.vectorSearch || {}), cacheDir: config.vectorCacheDir || config.vectorSearch?.cacheDir || DEFAULT_CONFIG.cacheDir };
+    this.vectors = new Map();
+    this.extractor = null;
+    this.loadingPromise = null;
+    this.lastError = '';
+    this.queue = [];
+    this.queuedIds = new Set();
+    this.processing = false;
     fs.ensureDirSync(this.config.cacheDir);
     this.loadCache();
   }
 
-  /**
-   * Check if service is ready (model loaded)
-   */
-  isReady() {
-    return this.model !== null;
-  }
-
-  /**
-   * Initialize the embedding model
-   */
-  async initialize() {
-    if (this.model) return;
-    
-    try {
-      console.log('🧠 Loading embedding model...');
-      
-      // Dynamic import to avoid loading TF if not needed
-      this.tf = await import('@tensorflow/tfjs');
-      const use = await import('@tensorflow-models/universal-sentence-encoder');
-      
-      // Load lightweight model
-      this.model = await use.load();
-      
-      console.log('✅ Embedding model loaded');
-    } catch (error) {
-      console.error('Failed to load embedding model:', error.message);
-      throw error;
+  updateRuntimeConfig(updates = {}) {
+    this.config = { ...this.config, ...updates };
+    if (updates.modelId && updates.modelId !== this.extractor?.model_id) {
+      this.extractor = null;
+      this.loadingPromise = null;
     }
   }
 
-  /**
-   * Generate embedding for text
-   */
-  async generateEmbedding(text) {
-    if (!this.model) {
-      await this.initialize();
-    }
-    
-    const embeddings = await this.model.embed([text]);
-    const vector = await embeddings.data();
-    embeddings.dispose();
-    
-    return Array.from(vector);
+  isEnabled() { return this.config.enabled === true; }
+
+  getStatus() {
+    const configured = Boolean(this.config.modelId);
+    let state = this.extractor ? 'ready' : 'disabled';
+    if (this.isEnabled() && !configured) state = 'unavailable';
+    else if (this.isEnabled() && this.lastError) state = 'unavailable';
+    else if (this.loadingPromise) state = 'warming';
+    else if (this.isEnabled() && this.extractor) state = 'ready';
+    else if (this.isEnabled()) state = 'warming';
+    return { enabled: this.isEnabled(), configured, state, modelId: this.config.modelId || '', indexed: this.vectors.size, queued: this.queue.length, error: this.lastError || null };
   }
 
-  /**
-   * Build search text from analysis
-   */
+  getStats() {
+    const status = this.getStatus();
+    return { totalIndexed: status.indexed, isReady: status.state === 'ready' };
+  }
+
   buildSearchText(analysis) {
-    const parts = [];
-    
-    if (analysis.tags?.length) {
-      parts.push(...analysis.tags);
-    }
-    
-    if (analysis.category) {
-      parts.push(analysis.category);
-    }
-    
-    if (analysis.description) {
-      parts.push(analysis.description);
-    }
-    
-    if (analysis.technical?.composition) {
-      parts.push(analysis.technical.composition);
-    }
-    
-    if (analysis.technical?.lighting) {
-      parts.push(analysis.technical.lighting);
-    }
-    
-    return parts.join('. ');
+    return [
+      ...(analysis.tags || []),
+      analysis.category,
+      analysis.description,
+      analysis.technical?.composition,
+      analysis.technical?.lighting,
+    ].filter(Boolean).join('. ');
   }
 
-  /**
-   * Index a photo's analysis for vector search
-   */
+  async ensureReady({ allowDisabled = false } = {}) {
+    if (!this.isEnabled() && !allowDisabled) throw new Error('Vector search is disabled');
+    if (!this.config.modelId) throw new Error('Vector search model is not configured');
+    if (this.extractor) return this.extractor;
+    if (!this.loadingPromise) {
+      this.lastError = '';
+      this.loadingPromise = (async () => {
+        try {
+          const { pipeline } = await import('@huggingface/transformers');
+          const extractor = await pipeline('feature-extraction', this.config.modelId, { dtype: 'q8' });
+          this.extractor = extractor;
+          return extractor;
+        } catch (error) {
+          this.lastError = error.message || 'Failed to load vector model';
+          throw error;
+        } finally {
+          this.loadingPromise = null;
+        }
+      })();
+    }
+    return this.loadingPromise;
+  }
+
+  async generateEmbedding(text) {
+    const extractor = await this.ensureReady();
+    const output = await extractor(`passage: ${text}`, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  }
+
+  async downloadModel() {
+    await this.ensureReady({ allowDisabled: true });
+    return this.getStatus();
+  }
+
+  scheduleIndex(analysis) {
+    if (!this.isEnabled() || !analysis?.photoId || this.queuedIds.has(analysis.photoId)) return;
+    this.queue.push(analysis);
+    this.queuedIds.add(analysis.photoId);
+    void this.processQueue();
+  }
+
+  scheduleBatch(analyses = []) {
+    analyses.forEach(analysis => this.scheduleIndex(analysis));
+  }
+
+  async processQueue() {
+    if (this.processing || !this.isEnabled()) return;
+    this.processing = true;
+    try {
+      while (this.queue.length && this.isEnabled()) {
+        const analysis = this.queue.shift();
+        this.queuedIds.delete(analysis.photoId);
+        await this.indexPhoto(analysis.photoId, analysis);
+      }
+    } catch (error) {
+      this.lastError = error.message || 'Vector indexing failed';
+    } finally {
+      this.processing = false;
+    }
+  }
+
   async indexPhoto(photoId, analysis) {
-    try {
-      const searchText = this.buildSearchText(analysis);
-      
-      if (!searchText.trim()) {
-        console.warn(`No searchable text for photo ${photoId}`);
-        return null;
-      }
-      
-      const vector = await this.generateEmbedding(searchText);
-      
-      const entry = {
-        photoId,
-        vector,
-        text: searchText,
-        indexedAt: new Date().toISOString()
-      };
-      
-      this.vectors.set(photoId, entry);
-      await this.saveCache();
-      
-      return entry;
-    } catch (error) {
-      console.error(`Failed to index photo ${photoId}:`, error.message);
-      return null;
-    }
+    const text = this.buildSearchText(analysis);
+    if (!text.trim()) return null;
+    const textHash = hashText(text);
+    const existing = this.vectors.get(photoId);
+    if (existing?.textHash === textHash && existing?.modelId === this.config.modelId) return existing;
+    const vector = await this.generateEmbedding(text);
+    const entry = { photoId, vector, textHash, modelId: this.config.modelId, indexedAt: new Date().toISOString() };
+    this.vectors.set(photoId, entry);
+    await this.saveCache();
+    return entry;
   }
 
-  /**
-   * Batch index multiple photos
-   */
-  async indexBatch(analyses, onProgress) {
-    const results = [];
-    
-    for (let i = 0; i < analyses.length; i++) {
-      const analysis = analyses[i];
-      const result = await this.indexPhoto(analysis.photoId, analysis);
-      results.push(result);
-      
-      if (onProgress) {
-        onProgress(i + 1, analyses.length, analysis.photoId);
-      }
-      
-      // Small delay to prevent blocking
-      if (i < analyses.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
-    }
-    
-    return results;
+  cosineSimilarity(a, b) {
+    let dot = 0;
+    let aNorm = 0;
+    let bNorm = 0;
+    for (let i = 0; i < a.length; i += 1) { dot += a[i] * b[i]; aNorm += a[i] * a[i]; bNorm += b[i] * b[i]; }
+    return aNorm && bNorm ? dot / (Math.sqrt(aNorm) * Math.sqrt(bNorm)) : 0;
   }
 
-  /**
-   * Calculate cosine similarity between two vectors
-   */
-  cosineSimilarity(vecA, vecB) {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    
-    for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
-    }
-    
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  async search(query, topK = 100) {
+    if (!this.isEnabled() || this.vectors.size === 0) return [];
+    const queryVector = await (await this.ensureReady())(`query: ${query}`, { pooling: 'mean', normalize: true });
+    const vector = Array.from(queryVector.data);
+    return [...this.vectors.values()]
+      .filter(entry => entry.modelId === this.config.modelId && Array.isArray(entry.vector))
+      .map(entry => ({ photoId: entry.photoId, similarity: this.cosineSimilarity(vector, entry.vector) }))
+      .filter(result => result.similarity >= this.config.minScore)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
   }
 
-  /**
-   * Semantic search using vector similarity
-   */
-  async search(query, topK = 10, minScore = 0.3) {
-    if (!this.model) {
-      await this.initialize();
-    }
-    
-    if (this.vectors.size === 0) {
-      return [];
-    }
-    
-    const queryVector = await this.generateEmbedding(query);
-    
-    const results = [];
-    
-    for (const [photoId, entry] of this.vectors) {
-      const similarity = this.cosineSimilarity(queryVector, entry.vector);
-      
-      if (similarity >= minScore) {
-        results.push({
-          photoId,
-          similarity,
-          text: entry.text
-        });
-      }
-    }
-    
-    // Sort by similarity (descending)
-    results.sort((a, b) => b.similarity - a.similarity);
-    
-    return results.slice(0, topK);
-  }
-
-  /**
-   * Hybrid search: combine vector similarity with keyword matching
-   */
-  async hybridSearch(query, analyses, options = {}) {
-    const { 
-      topK = 10, 
-      minVectorScore = 0.3,
-      keywordBoost = 0.2  // Boost for keyword matches
-    } = options;
-    
-    // Get vector search results
-    const vectorResults = await this.search(query, topK * 2, minVectorScore);
-    
-    // Build keyword set
-    const keywords = query.toLowerCase().split(/\s+/).filter(k => k.length > 1);
-    
-    // Combine with keyword matching
-    const combinedResults = vectorResults.map(result => {
-      const analysis = analyses.find(a => a.photoId === result.photoId);
-      let keywordScore = 0;
-      
-      if (analysis && keywords.length > 0) {
-        const searchText = this.buildSearchText(analysis).toLowerCase();
-        const matches = keywords.filter(kw => searchText.includes(kw)).length;
-        keywordScore = (matches / keywords.length) * keywordBoost;
-      }
-      
-      return {
-        ...result,
-        finalScore: result.similarity + keywordScore,
-        analysis
-      };
-    });
-    
-    // Re-sort by final score
-    combinedResults.sort((a, b) => b.finalScore - a.finalScore);
-    
-    return combinedResults.slice(0, topK);
-  }
-
-  /**
-   * Remove a photo from index
-   */
   async removePhoto(photoId) {
-    this.vectors.delete(photoId);
-    await this.saveCache();
+    if (this.vectors.delete(photoId)) await this.saveCache();
   }
 
-  /**
-   * Clear all vectors
-   */
-  async clearIndex() {
-    this.vectors.clear();
-    await this.saveCache();
-    console.log('🧠 Vector index cleared');
-  }
-
-  /**
-   * Save vectors to disk
-   */
   async saveCache() {
-    try {
-      const cachePath = path.join(this.config.cacheDir, 'vector-index.json');
-      const data = Object.fromEntries(this.vectors);
-      await fs.writeJson(cachePath, data, { spaces: 2 });
-    } catch (error) {
-      console.warn('Failed to save vector cache:', error.message);
-    }
+    await fs.writeJson(path.join(this.config.cacheDir, 'vector-index.json'), Object.fromEntries(this.vectors), { spaces: 0 });
   }
 
-  /**
-   * Load vectors from disk
-   */
   async loadCache() {
     try {
       const cachePath = path.join(this.config.cacheDir, 'vector-index.json');
-      if (await fs.pathExists(cachePath)) {
-        const data = await fs.readJson(cachePath);
-        this.vectors = new Map(Object.entries(data));
-        console.log(`🧠 Loaded ${this.vectors.size} vectors from cache`);
-      }
+      if (await fs.pathExists(cachePath)) this.vectors = new Map(Object.entries(await fs.readJson(cachePath)));
     } catch (error) {
-      console.warn('Failed to load vector cache:', error.message);
+      this.lastError = `Failed to load vector cache: ${error.message}`;
     }
-  }
-
-  /**
-   * Get statistics
-   */
-  getStats() {
-    return {
-      totalIndexed: this.vectors.size,
-      isReady: this.isReady()
-    };
   }
 }
 

@@ -11,25 +11,9 @@ import ExifFramePanel from './components/ExifFramePanel';
 import PixelStretchPanel from './components/PixelStretchPanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
-import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig } from 'lucide-react';
+import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig, LogIn, LogOut, ShieldCheck } from 'lucide-react';
 
 // 妫€娴嬫槸鍚︿负鏈湴璁块棶锛堝彧鏈夋湰鍦版墠鑳界湅鍒扮鐞嗗叆鍙ｏ級
-const isLocalAccess = (): boolean => {
-  const hostname = window.location.hostname;
-  return (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname.startsWith('192.168.') ||
-    hostname.startsWith('10.') ||
-    hostname.startsWith('172.16.') ||
-    hostname.startsWith('172.17.') ||
-    hostname.startsWith('172.18.') ||
-    hostname.startsWith('172.19.') ||
-    hostname.startsWith('172.2') ||
-    hostname.startsWith('172.30.') ||
-    hostname.startsWith('172.31.')
-  );
-};
 
 const toolbarButtonClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-400 transition-all hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 disabled:cursor-not-allowed disabled:opacity-50';
 const toolbarButtonActiveClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md bg-gold text-obsidian shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70';
@@ -142,6 +126,12 @@ const App: React.FC = () => {
   const [showCreativePanel, setShowCreativePanel] = useState(false);
   const [pixelStretchPhotoId, setPixelStretchPhotoId] = useState<string | null>(null);
   const [exifFramePhoto, setExifFramePhoto] = useState<Photo | undefined>(undefined);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginCode, setLoginCode] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   
   // Mobile overlay state - for touch devices
   const [mobileOverlayPhotoId, setMobileOverlayPhotoId] = useState<string | null>(null);
@@ -157,7 +147,47 @@ const App: React.FC = () => {
 
   // 鏄惁鏄剧ず绠＄悊鍔熻兘锛堝彧鏈夋湰鍦拌闂墠鏄剧ず锛?
   const showRemoteTools = isApiAvailable;
-  const showAdminFeatures = isLocalAccess() && isApiAvailable;
+  const showAdminFeatures = isAdmin && isApiAvailable;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/photowall/api/auth/session')
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (!cancelled) setIsAdmin(data?.data?.role === 'admin'); })
+      .catch(() => { if (!cancelled) setIsAdmin(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const login = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIsLoggingIn(true);
+    setLoginError('');
+    try {
+      const response = await fetch('/photowall/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: loginPassword, code: loginCode })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || '登录失败。');
+      setIsAdmin(true);
+      setShowLogin(false);
+      setLoginPassword('');
+      setLoginCode('');
+    } catch (error) {
+      setLoginError((error as Error).message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const logout = async () => {
+    await fetch('/photowall/api/auth/logout', { method: 'POST' });
+    setIsAdmin(false);
+    setShowAdmin(false);
+    setIsMultiSelectMode(false);
+    setShowCreativePanel(false);
+  };
 
   // Get app name and photographer name from config or fallback
   const appName = config?.appName || 'SPRINKLER';
@@ -652,6 +682,17 @@ const App: React.FC = () => {
               </div>
             )}
 
+            {isApiAvailable && (
+              <button
+                onClick={() => isAdmin ? void logout() : setShowLogin(true)}
+                className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
+                title={isAdmin ? '退出管理员登录' : '管理员登录'}
+                aria-label={isAdmin ? '退出管理员登录' : '管理员登录'}
+              >
+                {isAdmin ? <LogOut size={18} /> : <LogIn size={18} />}
+              </button>
+            )}
+
             {/* Admin-only tools */}
             {showAdminFeatures && (
               <div className="hidden md:flex items-center gap-2">
@@ -1005,6 +1046,28 @@ const App: React.FC = () => {
         </div>
       </footer>
 
+      {showLogin && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <form onSubmit={login} className="w-full max-w-sm rounded-xl border border-white/10 bg-charcoal p-6 shadow-2xl">
+            <div className="mb-5 flex items-center gap-3">
+              <ShieldCheck className="text-gold" size={24} />
+              <div><h2 className="text-lg font-semibold text-white">管理员登录</h2><p className="text-xs text-gray-500">密码与 Google Authenticator 动态码</p></div>
+            </div>
+            <label className="mb-3 block text-sm text-gray-300">管理员密码
+              <input type="password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} autoComplete="current-password" required className="mt-1.5 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-white outline-none focus:border-gold" />
+            </label>
+            <label className="block text-sm text-gray-300">6 位动态码
+              <input value={loginCode} onChange={event => setLoginCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" required className="mt-1.5 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 tracking-[0.35em] text-white outline-none focus:border-gold" />
+            </label>
+            {loginError && <p className="mt-3 text-sm text-red-400">{loginError}</p>}
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" onClick={() => { setShowLogin(false); setLoginError(''); }} className="rounded-md px-3 py-2 text-sm text-gray-400 hover:text-white">取消</button>
+              <button disabled={isLoggingIn} className="rounded-md bg-gold px-4 py-2 text-sm font-semibold text-obsidian disabled:opacity-60">{isLoggingIn ? '验证中…' : '登录'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Lightbox Modal */}
       {selectedPhotoIndex !== null && (
         <Lightbox
@@ -1014,12 +1077,12 @@ const App: React.FC = () => {
           onPrev={handlePrev}
           hasNext={selectedPhotoIndex < filteredPhotos.length - 1}
           hasPrev={selectedPhotoIndex > 0}
-          onDelete={handleDeletePhoto}
+          onDelete={showAdminFeatures ? handleDeletePhoto : undefined}
           onAIAnalysis={() => {
             setAiAnalysisPhoto(filteredPhotos[selectedPhotoIndex]);
             setShowAIAnalysis(true);
           }}
-          onExifFrame={showAdminFeatures ? () => {
+          onExifFrame={showRemoteTools ? () => {
             setExifFramePhoto(filteredPhotos[selectedPhotoIndex]);
           } : undefined}
           onPixelStretch={() => {
