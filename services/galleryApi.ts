@@ -179,6 +179,43 @@ class GalleryApiService {
     return response.data || ['All'];
   }
 
+  async getUploadCategories(): Promise<string[]> {
+    const response = await this.request<string[]>('/uploads/categories');
+    return response.data || [];
+  }
+
+  async createUploadCategory(name: string): Promise<{ name: string; created: boolean }> {
+    const response = await this.request<{ name: string; created: boolean }>('/uploads/categories', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    return response.data!;
+  }
+
+  async uploadImages(category: string, files: File[]): Promise<{
+    category: string;
+    count: number;
+    files: string[];
+    original: true;
+    indexed: boolean;
+    warning: string | null;
+  }> {
+    const form = new FormData();
+    form.append('category', category);
+    files.forEach(file => form.append('images', file));
+
+    const response = await fetch(`${this.baseUrl}/uploads`, {
+      method: 'POST',
+      body: form,
+      headers: withAdminHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || `HTTP error ${response.status}`);
+    }
+    return data.data;
+  }
+
   // ==================== SOURCES ====================
 
   /**

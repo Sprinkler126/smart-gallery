@@ -12,7 +12,8 @@
     "start": "node server/index.js",
     "generate": "node scripts/generate-gallery.cjs",
     "auth:init": "node scripts/init-admin-auth.js",
-    "auth:test": "node scripts/auth-smoke-test.js"
+    "auth:test": "node scripts/auth-smoke-test.js",
+    "upload:test": "node scripts/upload-smoke-test.js"
   },
   "dependencies": {
     "@google/genai": "^1.33.0",
@@ -29,6 +30,7 @@
     "express": "^4.21.0",
     "fs-extra": "^11.2.0",
     "lucide-react": "^0.560.0",
+    "multer": "^2.2.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

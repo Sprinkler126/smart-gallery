@@ -7,6 +7,8 @@ import { Router } from 'express';
 import path from 'path';
 import fs from 'fs-extra';
 import crypto from 'crypto';
+import multer from 'multer';
+import sharp from 'sharp';
 import orientationService from '../services/orientationService.js';
 import { CreativeService } from '../services/creativeService.js';
 import { ExifFrameService } from '../services/exifFrameService.js';
@@ -29,6 +31,78 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
     config,
     baseDir: process.cwd()
   });
+  const uploadConfig = config.uploads || {};
+  const uploadSourceId = uploadConfig.sourceId || 'uploads';
+  const uploadRoot = path.resolve(uploadConfig.directory || './server/data/uploads');
+  const uploadIncomingDir = path.join(uploadRoot, '.incoming');
+  const uploadMaxFiles = Math.max(1, Number(uploadConfig.maxFiles) || 20);
+  const supportedUploadExtensions = new Set((config.supportedFormats || []).map(ext => ext.toLowerCase()));
+  const uploadStartupCleanup = fs.ensureDir(uploadIncomingDir).then(async () => {
+    const entries = await fs.readdir(uploadIncomingDir, { withFileTypes: true });
+    const staleBefore = Date.now() - 24 * 60 * 60 * 1000;
+    await Promise.all(entries.filter(entry => entry.isFile()).map(async entry => {
+      const filePath = path.join(uploadIncomingDir, entry.name);
+      const stats = await fs.stat(filePath);
+      if (stats.mtimeMs < staleBefore) await fs.remove(filePath);
+    }));
+  }).catch(error => {
+    console.error(`Failed to clean stale upload files: ${error.message}`);
+  });
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, callback) => {
+        fs.ensureDir(uploadIncomingDir).then(() => callback(null, uploadIncomingDir), callback);
+      },
+      filename: (_req, _file, callback) => callback(null, `${Date.now()}-${crypto.randomUUID()}.upload`)
+    }),
+    // Files stream directly to disk. Intentionally no fileSize limit: originals
+    // are kept byte-for-byte without loading the complete image into memory.
+    limits: { files: uploadMaxFiles },
+    fileFilter: (_req, file, callback) => {
+      const extension = path.extname(file.originalname).toLowerCase();
+      if (!supportedUploadExtensions.has(extension) || !file.mimetype?.startsWith('image/')) {
+        return callback(new Error(`Unsupported image type: ${extension || file.mimetype || 'unknown'}`));
+      }
+      callback(null, true);
+    }
+  });
+
+  const parseCategoryName = (value) => {
+    const name = String(value || '').trim();
+    if (!name || name.length > 80) throw new Error('Category name must contain 1-80 characters');
+    const windowsReservedName = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name);
+    if (name === '.' || name === '..' || name.endsWith('.') || windowsReservedName || /[\\/:*?"<>|\u0000-\u001f]/.test(name)) {
+      throw new Error('Category name contains invalid characters');
+    }
+    return name;
+  };
+
+  const categoryPath = (name) => {
+    const target = path.resolve(uploadRoot, name);
+    if (path.dirname(target) !== uploadRoot) throw new Error('Invalid category path');
+    return target;
+  };
+
+  const safeUploadFilename = (originalName) => {
+    const extension = path.extname(originalName).toLowerCase();
+    const baseName = path.basename(originalName, path.extname(originalName))
+      .normalize('NFKC')
+      .replace(/[^\p{L}\p{N}._ -]+/gu, '-')
+      .replace(/^[. ]+|[. ]+$/g, '')
+      .slice(0, 100) || 'image';
+    return `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${baseName}${extension}`;
+  };
+
+  const removeUploadTemps = async (files = []) => {
+    await Promise.all(files.map(file => fs.remove(file.path).catch(() => {})));
+  };
+
+  const receiveUploads = async (req, res) => {
+    await uploadStartupCleanup;
+    return new Promise((resolve, reject) => {
+      upload.array('images', uploadMaxFiles)(req, res, error => error ? reject(error) : resolve());
+    });
+  };
 
   const withTimeout = (promise, timeoutMs) => Promise.race([
     promise,
@@ -570,6 +644,96 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       });
     } catch (error) {
       res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  // ==================== UPLOADS ====================
+
+  router.get('/uploads/categories', requireAdmin, async (_req, res) => {
+    try {
+      await fs.ensureDir(uploadRoot);
+      const entries = await fs.readdir(uploadRoot, { withFileTypes: true });
+      const categories = entries
+        .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+        .map(entry => entry.name)
+        .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      res.json({ success: true, data: categories });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/uploads/categories', requireAdmin, async (req, res) => {
+    try {
+      const name = parseCategoryName(req.body?.name);
+      const target = categoryPath(name);
+      const existed = await fs.pathExists(target);
+      await fs.ensureDir(target);
+      res.status(existed ? 200 : 201).json({ success: true, data: { name, created: !existed } });
+    } catch (error) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/uploads', requireAdmin, async (req, res) => {
+    const movedFiles = [];
+    let filesCommitted = false;
+    try {
+      await receiveUploads(req, res);
+      const files = req.files || [];
+      if (!files.length) {
+        return res.status(400).json({ success: false, error: 'At least one image is required' });
+      }
+
+      const category = parseCategoryName(req.body?.category);
+      const targetDir = categoryPath(category);
+      await fs.ensureDir(targetDir);
+
+      // Verify actual file contents before moving anything into the gallery.
+      for (const file of files) {
+        await sharp(file.path).metadata();
+      }
+
+      for (const file of files) {
+        const filename = safeUploadFilename(file.originalname);
+        const target = path.join(targetDir, filename);
+        await fs.move(file.path, target, { overwrite: false });
+        movedFiles.push(target);
+      }
+      filesCommitted = true;
+
+      let indexed = true;
+      let warning = null;
+      try {
+        await galleryService.scanSource(uploadSourceId);
+      } catch (error) {
+        indexed = false;
+        warning = `Original files were saved, but gallery indexing failed: ${error.message}`;
+        console.error(warning);
+      }
+
+      res.status(201).json({
+        success: true,
+        data: {
+          category,
+          count: movedFiles.length,
+          files: movedFiles.map(file => path.basename(file)),
+          original: true,
+          indexed,
+          warning
+        }
+      });
+    } catch (error) {
+      await removeUploadTemps(req.files);
+      if (!filesCommitted) {
+        await Promise.all(movedFiles.map(file => fs.remove(file).catch(() => {})));
+      }
+      const isUploadLimit = error instanceof multer.MulterError;
+      const isClientError = isUploadLimit || /category|unsupported|image/i.test(error.message);
+      res.status(isClientError ? 400 : 500).json({
         success: false,
         error: error.message
       });

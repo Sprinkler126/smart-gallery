@@ -87,6 +87,31 @@ if (process.env.AI_MODEL) {
   config.aiModel = process.env.AI_MODEL;
 }
 
+// The managed upload source is always available. Its directory can be moved
+// outside the repository in production with UPLOAD_DIR.
+config.uploads = {
+  sourceId: 'uploads',
+  directory: './server/data/uploads',
+  maxFiles: 20,
+  ...(config.uploads || {})
+};
+if (process.env.UPLOAD_DIR) {
+  config.uploads.directory = process.env.UPLOAD_DIR;
+}
+config.imageSources = config.imageSources || [];
+if (!config.imageSources.some(source => source.id === config.uploads.sourceId)) {
+  config.imageSources.push({
+    id: config.uploads.sourceId,
+    name: 'Uploads',
+    type: 'local',
+    path: config.uploads.directory,
+    enabled: true,
+    defaultCategory: 'General',
+    useFolderAsCategory: true,
+    watch: false
+  });
+}
+
 // Log configuration source (without exposing the actual key)
 console.log('🔧 Configuration loaded:');
 console.log(`   AI Endpoint: ${config.aiApiEndpoint || 'not set'} ${process.env.AI_API_ENDPOINT ? '(from env)' : '(from config)'}`);
@@ -315,6 +340,9 @@ async function start() {
     console.log('  GET  /photowall/api/image/:id       - Get full image');
     console.log('  GET  /photowall/api/thumbnail/:id   - Get thumbnail');
     console.log('  GET  /photowall/api/categories      - Get categories');
+    console.log('  GET  /photowall/api/uploads/categories - Get upload categories (admin)');
+    console.log('  POST /photowall/api/uploads/categories - Create upload category (admin)');
+    console.log('  POST /photowall/api/uploads         - Upload images (admin)');
     console.log('  GET  /photowall/api/sources         - Get image sources');
     console.log('  POST /photowall/api/sources         - Add new source');
     console.log('  POST /photowall/api/sources/:id/scan- Scan a source');

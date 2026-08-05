@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { X, Plus, Trash2, FolderOpen, RefreshCw, HardDrive, Eye, EyeOff, Search } from 'lucide-react';
-import { ImageSource, GalleryStats } from '../services/galleryApi';
+import React, { useEffect, useState } from 'react';
+import { X, Plus, Trash2, FolderOpen, RefreshCw, HardDrive, Eye, Search, Upload, FolderPlus, Images } from 'lucide-react';
+import { galleryApi, ImageSource, GalleryStats } from '../services/galleryApi';
 
 interface AdminPanelProps {
   sources: ImageSource[];
@@ -40,6 +40,68 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [scanningSource, setScanningSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [uploadCategories, setUploadCategories] = useState<string[]>([]);
+  const [uploadCategory, setUploadCategory] = useState('General');
+  const [newCategory, setNewCategory] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
+
+  const loadUploadCategories = async () => {
+    try {
+      const categories = await galleryApi.getUploadCategories();
+      setUploadCategories(categories);
+      if (categories.length > 0 && !categories.includes(uploadCategory)) {
+        setUploadCategory(categories[0]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load upload categories');
+    }
+  };
+
+  useEffect(() => {
+    void loadUploadCategories();
+  }, []);
+
+  const handleCreateCategory = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!newCategory.trim()) return;
+    setIsCreatingCategory(true);
+    setError(null);
+    try {
+      const result = await galleryApi.createUploadCategory(newCategory);
+      setUploadCategory(result.name);
+      setNewCategory('');
+      await loadUploadCategories();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create category');
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  };
+
+  const handleUpload = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedFiles.length || !uploadCategory.trim()) return;
+    setIsUploading(true);
+    setError(null);
+    setUploadMessage(null);
+    try {
+      const result = await galleryApi.uploadImages(uploadCategory, selectedFiles);
+      setUploadMessage(result.indexed
+        ? `已原图上传 ${result.count} 张图片到“${result.category}”`
+        : `原图已安全保存，但图库索引暂未更新，请稍后点击“刷新全部”：${result.warning}`);
+      setSelectedFiles([]);
+      setFileInputKey(key => key + 1);
+      await Promise.allSettled([loadUploadCategories(), onRefresh()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   // Form state for new source
   const [newSource, setNewSource] = useState({
@@ -155,6 +217,76 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
         )}
+
+        {/* Authenticated upload manager */}
+        <div className="mb-6 rounded-xl border border-gold/20 bg-gold/5 p-4 sm:p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <Upload size={18} className="text-gold" />
+            <h3 className="font-medium text-white">上传图片</h3>
+            <span className="text-xs text-gray-500">原图直传，不压缩、不转码</span>
+          </div>
+
+          <form onSubmit={handleCreateCategory} className="mb-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={newCategory}
+              onChange={event => setNewCategory(event.target.value)}
+              placeholder="新建分类，例如：2026 夏天"
+              maxLength={80}
+              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-gold"
+            />
+            <button
+              type="submit"
+              disabled={isCreatingCategory || !newCategory.trim()}
+              className="flex items-center justify-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm text-white transition-colors hover:bg-white/15 disabled:opacity-50"
+            >
+              <FolderPlus size={16} />
+              {isCreatingCategory ? '创建中…' : '创建分类'}
+            </button>
+          </form>
+
+          <form onSubmit={handleUpload} className="grid gap-3 md:grid-cols-[minmax(160px,0.35fr)_1fr_auto] md:items-end">
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-400">上传到分类</span>
+              <input
+                list="upload-category-options"
+                value={uploadCategory}
+                onChange={event => setUploadCategory(event.target.value)}
+                maxLength={80}
+                required
+                className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-gold"
+              />
+              <datalist id="upload-category-options">
+                {uploadCategories.map(category => <option key={category} value={category} />)}
+              </datalist>
+            </label>
+
+            <label className="block min-w-0">
+              <span className="mb-1 block text-xs text-gray-400">选择原图（不限单张大小，一次最多 20 张）</span>
+              <span className="flex min-h-[38px] cursor-pointer items-center gap-2 rounded-lg border border-dashed border-white/20 bg-black/20 px-3 py-2 text-sm text-gray-300 hover:border-gold/60">
+                <Images size={16} className="shrink-0 text-gold" />
+                <span className="truncate">{selectedFiles.length ? `已选择 ${selectedFiles.length} 张` : '从相册、相机或电脑选择'}</span>
+              </span>
+              <input
+                key={fileInputKey}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
+                multiple
+                className="sr-only"
+                onChange={event => setSelectedFiles(Array.from(event.target.files || []).slice(0, 20))}
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={isUploading || !selectedFiles.length || !uploadCategory.trim()}
+              className="flex items-center justify-center gap-2 rounded-lg bg-gold px-5 py-2 text-sm font-medium text-obsidian transition-colors hover:bg-gold/90 disabled:opacity-50"
+            >
+              <Upload size={16} />
+              {isUploading ? '上传中…' : '开始上传'}
+            </button>
+          </form>
+          {uploadMessage && <p className="mt-3 text-sm text-green-400">{uploadMessage}</p>}
+        </div>
 
         {/* Sources List */}
         <div className="space-y-3 mb-6">
