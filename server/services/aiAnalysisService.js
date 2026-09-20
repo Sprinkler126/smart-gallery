@@ -520,6 +520,12 @@ export class AIAnalysisService {
     }
   }
 
+  recordProviderSuccess(provider) {
+    if (this.providerHealth.delete(provider.id)) {
+      console.log(`✅ AI provider ${provider.name || provider.id} restored after a successful image test`);
+    }
+  }
+
   async callProviderAPI(provider, base64Image, mimeType, prompt) {
     const { apiEndpoint, apiKey, model } = provider;
 
@@ -535,13 +541,16 @@ export class AIAnalysisService {
               type: 'image_url',
               image_url: {
                 url: `data:${mimeType};base64,${base64Image}`,
-                detail: 'high'
+                // Keep request size predictable for batch jobs and align with
+                // the capability check. Providers can still inspect the image
+                // at a practical analysis resolution.
+                detail: 'low'
               }
             }
           ]
         }
       ],
-      max_tokens: 8000,
+      max_tokens: 1800,
       temperature: 0.3
     };
 

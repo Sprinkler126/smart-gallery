@@ -1410,10 +1410,14 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         });
       }
 
-      // Test the exact multimodal protocol used by photo analysis. A text-only
-      // check would incorrectly approve providers/models that cannot accept an image.
+      // Test the same OpenAI-compatible image protocol used by photo analysis.
+      // A generated JPEG is deliberately used instead of a text-only request
+      // or a GIF, so the test reflects the usual gallery input format.
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const testImage = await sharp({
+        create: { width: 32, height: 32, channels: 3, background: { r: 34, g: 34, b: 34 } }
+      }).jpeg({ quality: 80 }).toBuffer();
       
       const testResponse = await fetch(apiEndpoint, {
         method: 'POST',
@@ -1427,7 +1431,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
             role: 'user',
             content: [
               { type: 'text', text: 'Reply with OK if this image input is supported.' },
-              { type: 'image_url', image_url: { url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', detail: 'low' } }
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${testImage.toString('base64')}`, detail: 'low' } }
             ]
           }],
           max_tokens: 20
@@ -1443,6 +1447,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       }
 
       const data = await testResponse.json();
+      if (provider) aiAnalysisService.recordProviderSuccess(provider);
       
       res.json({
         success: true,
