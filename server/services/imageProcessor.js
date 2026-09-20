@@ -60,8 +60,14 @@ export class ImageProcessor {
    * Some HEIF files have .jpg extension but are actually HEIF
    */
   async isHeifFormat(imagePath) {
+    let handle;
     try {
-      const buffer = await fs.readFile(imagePath, { length: 12 });
+      // fs.readFile ignores a `length` option and would load the entire image.
+      // Read just the file signature so repeated scans cannot retain large buffers.
+      handle = await fs.open(imagePath, 'r');
+      const buffer = Buffer.alloc(12);
+      const { bytesRead } = await fs.read(handle, buffer, 0, buffer.length, 0);
+      if (bytesRead < buffer.length) return false;
       // HEIF files start with ftyp box: 00 00 00 XX 66 74 79 70 68 65 69 63
       // or 00 00 00 XX 66 74 79 70 6D 69 66 31
       const ftypSignature = buffer.toString('hex', 4, 8);
@@ -74,6 +80,9 @@ export class ImageProcessor {
       return false;
     } catch {
       return false;
+    } finally {
+      if (typeof handle === 'number') await fs.close(handle);
+      else await handle?.close();
     }
   }
 

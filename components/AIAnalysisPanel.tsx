@@ -27,13 +27,38 @@ interface AIConfig {
 
 interface AIProviderConfig {
   id: string;
+  preset?: string;
   name: string;
   apiEndpoint: string;
   apiKey: string;
   model: string;
   enabled: boolean;
   priority: number;
+  health?: { status: 'ready' | 'cooldown' | 'disabled'; reason?: string; retryAt?: number };
 }
+
+type ProviderPreset = {
+  id: string;
+  name: string;
+  apiEndpoint: string;
+  model: string;
+  supportsVision: boolean | 'model-dependent' | 'unknown';
+  note?: string;
+};
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: 'openai', name: 'OpenAI', apiEndpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', supportsVision: true },
+  { id: 'qwen', name: '通义千问（DashScope）', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: 'qwen-vl-max-latest', supportsVision: true },
+  { id: 'zhipu', name: '智谱 AI', apiEndpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4v-plus', supportsVision: true },
+  { id: 'siliconflow', name: '硅基流动', apiEndpoint: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen2.5-VL-72B-Instruct', supportsVision: true },
+  { id: 'openrouter', name: 'OpenRouter', apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'google/gemini-2.5-flash', supportsVision: true },
+  { id: 'deepseek', name: 'DeepSeek（仅文本）', apiEndpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat', supportsVision: false, note: '默认模型不接收图片，不能用于照片分析。' },
+  { id: 'mimo', name: '小米 MiMo', apiEndpoint: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions', model: 'mimo-v2.5-pro', supportsVision: 'model-dependent', note: '图片能力取决于已开通的模型，请先测试。' },
+  { id: 'custom', name: '自定义 OpenAI 兼容接口', apiEndpoint: '', model: '', supportsVision: 'unknown' },
+];
+
+const getPreset = (presetId?: string) => PROVIDER_PRESETS.find(preset => preset.id === presetId) || PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
+const isMaskedApiKey = (apiKey: string) => apiKey === '********' || apiKey === '••••••••';
 
 interface AnalysisStats {
   totalAnalyzed: number;
@@ -99,6 +124,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
   const [downloadingLogoPack, setDownloadingLogoPack] = useState(false);
   const [acceptLogoTerms, setAcceptLogoTerms] = useState(false);
   const [dependencyError, setDependencyError] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('openai');
   
   // Batch analysis state
   const [batchProgress, setBatchProgress] = useState<{current: number; total: number; photoId?: string} | null>(null);
@@ -207,7 +233,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           aiApiEndpoint: config.apiEndpoint,
-          aiApiKey: config.apiKey === '********' ? undefined : config.apiKey,
+          aiApiKey: isMaskedApiKey(config.apiKey) ? undefined : config.apiKey,
           aiModel: config.model,
           enableAutoAnalysis: config.enableAutoAnalysis,
           maxConcurrentAnalysis: config.maxConcurrentAnalysis,
@@ -337,15 +363,17 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
     });
   };
 
-  const addProvider = () => {
+  const addProvider = (presetId = 'custom') => {
+    const preset = getPreset(presetId);
     updateProviders(providers => [
       ...providers,
       {
-        id: `provider-${Date.now()}`,
-        name: `Provider ${providers.length + 1}`,
-        apiEndpoint: '',
+        id: `${preset.id}-${Date.now()}`,
+        preset: preset.id,
+        name: preset.name,
+        apiEndpoint: preset.apiEndpoint,
         apiKey: '',
-        model: config.model || 'multimodal-large',
+        model: preset.model || config.model || 'multimodal-large',
         enabled: true,
         priority: providers.length,
       }
@@ -385,7 +413,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
     if (!provider.apiEndpoint || !provider.apiKey) {
       setProviderTestResults(prev => ({
         ...prev,
-        [provider.id]: { success: false, message: 'Endpoint and API key are required' }
+        [provider.id]: { success: false, message: '请填写 API Key；自定义接口还需要 Endpoint' }
       }));
       return;
     }
@@ -398,7 +426,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
     });
 
     try {
-      const isSavedMaskedProvider = provider.apiKey === '********';
+      const isSavedMaskedProvider = isMaskedApiKey(provider.apiKey);
       const response = await adminFetch('/photowall/api/analysis/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -900,18 +928,28 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-medium text-white">AI Provider Queue</h3>
+          <h3 className="text-base font-medium text-white">AI 服务商与故障切换</h3>
           <p className="text-xs text-gray-500 mt-1">
-            Drag providers to change fallback order. The first enabled provider is tried first.
+            按顺序尝试服务商；失败时自动切换到下一个。拖动卡片可调整优先级。
           </p>
         </div>
-        <button
-          onClick={addProvider}
-          className="px-3 py-2 bg-gold text-obsidian rounded-lg hover:bg-gold/90 transition-colors flex items-center gap-2 text-sm"
-        >
-          <Plus size={16} />
-          Add API
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedPreset}
+            onChange={(event) => setSelectedPreset(event.target.value)}
+            aria-label="选择预设服务商"
+            className="max-w-52 bg-black/30 border border-white/10 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:border-gold"
+          >
+            {PROVIDER_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+          </select>
+          <button
+            onClick={() => addProvider(selectedPreset)}
+            className="px-3 py-2 bg-gold text-obsidian rounded-lg hover:bg-gold/90 transition-colors flex items-center gap-2 text-sm whitespace-nowrap"
+          >
+            <Plus size={16} />
+            添加服务商
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -927,11 +965,11 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
             }}
             className="w-4 h-4 rounded border-white/20 bg-white/5 text-gold"
           />
-          <span className="text-sm text-gray-300">Enable auto-analysis for new photos</span>
+          <span className="text-sm text-gray-300">自动分析新加入的照片</span>
         </label>
 
         <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3">
-          <label className="block text-xs text-gray-500 mb-2">Auto-analysis concurrency</label>
+          <label className="block text-xs text-gray-500 mb-2">全局并发数（建议 1–2）</label>
           <input
             type="number"
             min={1}
@@ -953,32 +991,39 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
             onChange={(e) => setConfig({ ...config, vectorSearchEnabled: e.target.checked })}
             className="w-4 h-4 rounded border-white/20 bg-white/5 text-gold"
           />
-          <span className="text-sm text-gray-300">Enable optional vector search</span>
+          <span className="text-sm text-gray-300">启用可选的向量检索</span>
         </label>
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3">
-        <label className="block text-xs text-gray-500 mb-2">Vector model ID</label>
+        <label className="block text-xs text-gray-500 mb-2">向量模型 ID</label>
         <input
           value={config.vectorSearchModelId}
           onChange={(e) => setConfig({ ...config, vectorSearchModelId: e.target.value })}
           placeholder="Xenova/multilingual-e5-small"
           className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gold"
         />
-        <p className="mt-2 text-xs text-gray-500">Disabled by default. If the model is unavailable, search automatically falls back to keyword matching.</p>
+        <p className="mt-2 text-xs text-gray-500">默认关闭；模型不可用时，搜索会自动回退到关键词匹配。</p>
       </div>
 
       <div className="space-y-3">
         {config.aiProviders.length === 0 ? (
           <div className="border border-dashed border-white/15 rounded-lg p-8 text-center">
             <Brain size={40} className="mx-auto text-gray-600 mb-3" />
-            <p className="text-white/80">No AI providers configured</p>
-            <p className="text-gray-500 text-sm mt-1">Add an OpenAI-compatible vision API to start automatic analysis.</p>
+            <p className="text-white/80">尚未配置 AI 服务商</p>
+            <p className="text-gray-500 text-sm mt-1">选择预设厂商后，只需填写 API Key；自定义兼容接口才需要填写地址。</p>
           </div>
         ) : (
           config.aiProviders.map((provider, index) => {
             const result = providerTestResults[provider.id];
             const isTestingThis = testingProviderId === provider.id;
+            const preset = getPreset(provider.preset);
+            const isCustomProvider = preset.id === 'custom';
+            const visionMessage = preset.supportsVision === true
+              ? '支持图片输入'
+              : preset.supportsVision === false
+                ? '默认不支持图片输入'
+                : '图片能力需测试确认';
 
             return (
               <div
@@ -998,7 +1043,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
                 <div className="flex items-start gap-3">
                   <button
                     className="mt-2 text-gray-500 hover:text-white cursor-grab"
-                    title="Drag to reorder"
+                    title="拖动调整优先级"
                   >
                     <GripVertical size={18} />
                   </button>
@@ -1011,7 +1056,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
                       <input
                         value={provider.name}
                         onChange={(e) => updateProvider(provider.id, { name: e.target.value })}
-                        placeholder="Provider name"
+                        placeholder="服务商名称"
                         className="flex-1 min-w-40 bg-transparent border-b border-white/10 px-1 py-1 text-white font-medium focus:outline-none focus:border-gold"
                       />
                       <button
@@ -1019,14 +1064,14 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
                         className={`p-2 rounded-lg transition-colors ${
                           provider.enabled ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-gray-500'
                         }`}
-                        title={provider.enabled ? 'Enabled' : 'Disabled'}
+                        title={provider.enabled ? '已启用（点击停用）' : '已停用（点击启用）'}
                       >
                         <Power size={16} />
                       </button>
                       <button
                         onClick={() => removeProvider(provider.id)}
                         className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                        title="Remove provider"
+                        title="删除服务商"
                       >
                         <Trash2 size={16} />
                       </button>
@@ -1034,27 +1079,58 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Endpoint</label>
-                        <input
-                          value={provider.apiEndpoint}
-                          onChange={(e) => updateProvider(provider.id, { apiEndpoint: e.target.value })}
-                          placeholder="https://api.openai.com/v1/chat/completions"
-                          className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-gold"
-                        />
+                        <label className="block text-xs text-gray-500 mb-1">服务商预设</label>
+                        <select
+                          value={provider.preset || 'custom'}
+                          onChange={(event) => {
+                            const nextPreset = getPreset(event.target.value);
+                            updateProvider(provider.id, {
+                              preset: nextPreset.id,
+                              name: nextPreset.name,
+                              apiEndpoint: nextPreset.apiEndpoint,
+                              model: nextPreset.model || provider.model,
+                            });
+                          }}
+                          className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-gold"
+                        >
+                          {PROVIDER_PRESETS.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+                        </select>
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Model</label>
+                        <label className="block text-xs text-gray-500 mb-1">模型（可按账户权限修改）</label>
                         <input
                           value={provider.model}
                           onChange={(e) => updateProvider(provider.id, { model: e.target.value })}
-                          placeholder="gpt-4o-mini"
+                          placeholder="预设模型"
                           className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-gold"
                         />
                       </div>
                     </div>
 
+                    {isCustomProvider ? (
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Endpoint（自定义接口必填）</label>
+                        <input
+                          value={provider.apiEndpoint}
+                          onChange={(e) => updateProvider(provider.id, { apiEndpoint: e.target.value })}
+                          placeholder="https://example.com/v1/chat/completions"
+                          className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                    ) : (
+                      <div className={`rounded-lg px-3 py-2 text-xs ${preset.supportsVision === false ? 'bg-amber-500/10 text-amber-300' : 'bg-white/5 text-gray-400'}`}>
+                        已使用预设地址：{provider.apiEndpoint || preset.apiEndpoint} · {visionMessage}{preset.note ? `；${preset.note}` : '。只需填写 API Key。'}
+                      </div>
+                    )}
+
+                    {provider.health?.status && provider.health.status !== 'ready' && (
+                      <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                        当前已暂停：{provider.health.reason || '服务商不可用'}。修正配置后保存即可恢复。
+                      </div>
+                    )}
+
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">API Key</label>
+                      <label className="block text-xs text-gray-500 mb-1">API Key（预设厂商只需填写此项）</label>
                       <input
                         type="password"
                         value={provider.apiKey}
@@ -1075,7 +1151,7 @@ const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ photo, onClose, allow
                         ) : (
                           <FlaskConical size={14} />
                         )}
-                        Test
+                        测试图片能力
                       </button>
                       {result && (
                         <span className={`text-xs ${result.success ? 'text-green-400' : 'text-red-400'}`}>

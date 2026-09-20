@@ -12,6 +12,7 @@ import sharp from 'sharp';
 import orientationService from '../services/orientationService.js';
 import { CreativeService } from '../services/creativeService.js';
 import { ExifFrameService } from '../services/exifFrameService.js';
+import { applyProviderPreset } from '../services/providerPresets.js';
 
 // Use native fetch (Node.js 18+)
 const fetch = globalThis.fetch || (await import('node-fetch')).default;
@@ -288,12 +289,21 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         ? existingProvider.apiKey || ''
         : provider.apiKey || '';
 
-      return {
+      const resolved = applyProviderPreset({
         id,
-        name: provider.name || id,
+        preset: provider.preset || 'custom',
+        name: provider.name || '',
         apiEndpoint: provider.apiEndpoint || provider.endpoint || '',
         apiKey,
-        model: provider.model || 'multimodal-large',
+        model: provider.model || '',
+        enabled: provider.enabled !== false,
+        priority: Number.isFinite(Number(provider.priority)) ? Number(provider.priority) : index
+      });
+
+      return {
+        ...resolved,
+        id,
+        apiKey,
         enabled: provider.enabled !== false,
         priority: Number.isFinite(Number(provider.priority)) ? Number(provider.priority) : index
       };
@@ -1400,7 +1410,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         });
       }
 
-      // Test with a simple request (no image, just text)
+      // Test the exact multimodal protocol used by photo analysis. A text-only
+      // check would incorrectly approve providers/models that cannot accept an image.
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       
@@ -1412,8 +1423,14 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         },
         body: JSON.stringify({
           model: model || 'multimodal-large',
-          messages: [{ role: 'user', content: 'Hello, this is a test.' }],
-          max_tokens: 10
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Reply with OK if this image input is supported.' },
+              { type: 'image_url', image_url: { url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', detail: 'low' } }
+            ]
+          }],
+          max_tokens: 20
         }),
         signal: controller.signal
       });
@@ -1429,7 +1446,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       
       res.json({
         success: true,
-        message: 'API connection successful',
+        message: '图片能力测试通过',
         model: data.model || model,
         response: data.choices?.[0]?.message?.content || 'OK'
       });

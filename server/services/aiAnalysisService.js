@@ -11,6 +11,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import crypto from 'crypto';
+import { applyProviderPreset } from './providerPresets.js';
 
 export class AIAnalysisService {
   constructor(config = {}, databaseService = null) {
@@ -46,7 +47,9 @@ export class AIAnalysisService {
     };
     
     this.analysisQueue = [];
-    this.isProcessing = false;
+    this.analysisQueuedKeys = new Map();
+    this.activeAnalyses = 0;
+    this.providerHealth = new Map();
     this.autoAnalysisQueue = [];
     this.autoAnalysisQueuedKeys = new Set();
     this.activeAutoAnalyses = 0;
@@ -79,6 +82,11 @@ export class AIAnalysisService {
     
     // Ensure cache directory exists (now that we have the correct path)
     await fs.ensureDir(this.config.cacheDir);
+
+    const interruptedJobs = this.database?.interruptActiveAnalysisJobs();
+    if (interruptedJobs) {
+      console.warn(`⚠️ Marked ${interruptedJobs} interrupted analysis job(s) after server restart`);
+    }
     
       console.log(`   Cache directory: ${this.config.cacheDir}`);
       if (!this.cacheLoaded) {
@@ -100,15 +108,19 @@ export class AIAnalysisService {
   normalizeProviders(config = {}) {
     const configured = Array.isArray(config.aiProviders) ? config.aiProviders : [];
     const providers = configured
-      .map((provider, index) => ({
-        id: provider.id || `provider-${index + 1}`,
-        name: provider.name || provider.id || `Provider ${index + 1}`,
-        apiEndpoint: provider.apiEndpoint || provider.endpoint || '',
-        apiKey: provider.apiKey || provider.key || '',
-        model: provider.model || config.aiModel || process.env.AI_MODEL || 'multimodal-large',
+      .map((provider, index) => {
+        const resolved = applyProviderPreset(provider);
+        return {
+        id: resolved.id || `provider-${index + 1}`,
+        preset: resolved.preset,
+        name: resolved.name || resolved.id || `Provider ${index + 1}`,
+        apiEndpoint: resolved.apiEndpoint,
+        apiKey: resolved.apiKey || resolved.key || '',
+        model: resolved.model || config.aiModel || process.env.AI_MODEL || 'multimodal-large',
         enabled: provider.enabled !== false,
         priority: Number.isFinite(Number(provider.priority)) ? Number(provider.priority) : index
-      }))
+        };
+      })
       .filter(provider => provider.apiEndpoint || provider.apiKey || provider.model);
 
     const legacyEndpoint = config.aiApiEndpoint || process.env.AI_API_ENDPOINT || '';
@@ -120,6 +132,7 @@ export class AIAnalysisService {
       if (!hasLegacyProvider) {
         providers.unshift({
           id: 'legacy-primary',
+          preset: 'custom',
           name: 'Primary',
           apiEndpoint: legacyEndpoint,
           apiKey: legacyKey,
@@ -133,21 +146,38 @@ export class AIAnalysisService {
     return providers.sort((a, b) => a.priority - b.priority);
   }
 
+  getProviderHealth(providerId) {
+    const health = this.providerHealth.get(providerId);
+    if (!health) return { status: 'ready' };
+    if (health.retryAt && health.retryAt <= Date.now()) {
+      this.providerHealth.delete(providerId);
+      return { status: 'ready' };
+    }
+    return health;
+  }
+
+  isProviderUsable(provider) {
+    const health = this.getProviderHealth(provider.id);
+    return health.status !== 'disabled' && health.status !== 'cooldown';
+  }
+
   getAvailableProviders() {
     return (this.config.providers || [])
-      .filter(provider => provider.enabled !== false && provider.apiEndpoint && provider.apiKey)
+      .filter(provider => provider.enabled !== false && provider.apiEndpoint && provider.apiKey && this.isProviderUsable(provider))
       .sort((a, b) => a.priority - b.priority);
   }
 
   getSafeProviders() {
     return (this.config.providers || []).map(provider => ({
       id: provider.id,
+      preset: provider.preset || 'custom',
       name: provider.name,
       apiEndpoint: provider.apiEndpoint,
       apiKey: provider.apiKey ? '••••••••' : '',
       model: provider.model,
       enabled: provider.enabled !== false,
-      priority: provider.priority
+      priority: provider.priority,
+      health: this.getProviderHealth(provider.id)
     }));
   }
 
@@ -163,6 +193,7 @@ export class AIAnalysisService {
       maxConcurrentAnalysis: this.config.maxConcurrent,
       providers: (this.config.providers || []).map(provider => ({
         id: provider.id,
+        preset: provider.preset || 'custom',
         name: provider.name,
         apiEndpoint: provider.apiEndpoint,
         apiKey: provider.apiKey,
@@ -177,6 +208,7 @@ export class AIAnalysisService {
    * Update runtime config after /config saves AI settings.
    */
   updateRuntimeConfig(updates = {}) {
+    this.providerHealth.clear();
     if (updates.aiApiEndpoint !== undefined) {
       this.config.apiEndpoint = updates.aiApiEndpoint;
     }
@@ -322,6 +354,43 @@ export class AIAnalysisService {
       return this.cache.get(cacheKey);
     }
 
+    return this.enqueueAnalysis(photo, force);
+  }
+
+  enqueueAnalysis(photo, force = false) {
+    const queueKey = `${this.getCacheKey(photo.id, photo.originalPath)}:${force ? 'force' : 'normal'}`;
+    const existing = this.analysisQueuedKeys.get(queueKey);
+    if (existing) return existing;
+
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    this.analysisQueuedKeys.set(queueKey, promise);
+    this.analysisQueue.push({ photo, force, queueKey, resolve, reject });
+    this.drainAnalysisQueue();
+    return promise;
+  }
+
+  drainAnalysisQueue() {
+    const maxConcurrent = Math.max(1, Number(this.config.maxConcurrent) || 1);
+    while (this.activeAnalyses < maxConcurrent && this.analysisQueue.length > 0) {
+      const task = this.analysisQueue.shift();
+      this.activeAnalyses++;
+      this.performAnalysis(task.photo, task.force)
+        .then(task.resolve, task.reject)
+        .finally(() => {
+          this.activeAnalyses--;
+          this.analysisQueuedKeys.delete(task.queueKey);
+          this.drainAnalysisQueue();
+        });
+    }
+  }
+
+  async performAnalysis(photo, force = false) {
+
     console.log(`🧠 Analyzing image: ${photo.title}${force ? ' (forced re-analysis)' : ''}`);
 
     try {
@@ -414,6 +483,7 @@ export class AIAnalysisService {
         }
         return result;
       } catch (error) {
+        this.recordProviderFailure(provider, error);
         const message = `${provider.name || provider.id}: ${error.message}`;
         errors.push(message);
         console.warn(`   ⚠️ AI provider failed, trying next: ${message}`);
@@ -421,6 +491,33 @@ export class AIAnalysisService {
     }
 
     throw new Error(`All AI providers failed: ${errors.join(' | ')}`);
+  }
+
+  recordProviderFailure(provider, error) {
+    const message = error?.message || 'Unknown provider error';
+    const status = Number(message.match(/API error:\s*(\d{3})/)?.[1]);
+
+    if ([400, 401, 403, 404, 422].includes(status)) {
+      this.providerHealth.set(provider.id, {
+        status: 'disabled',
+        reason: status === 401 || status === 403
+          ? `Authentication failed (${status})`
+          : `Unsupported image request or model (${status})`,
+        failedAt: new Date().toISOString()
+      });
+      console.error(`⛔ AI provider ${provider.name || provider.id} disabled: ${this.getProviderHealth(provider.id).reason}`);
+      return;
+    }
+
+    if (status === 429 || status >= 500 || error?.name === 'AbortError') {
+      this.providerHealth.set(provider.id, {
+        status: 'cooldown',
+        reason: status ? `Temporary API error (${status})` : 'Request timed out',
+        retryAt: Date.now() + 60_000,
+        failedAt: new Date().toISOString()
+      });
+      console.warn(`⏸️ AI provider ${provider.name || provider.id} paused for 60 seconds`);
+    }
   }
 
   async callProviderAPI(provider, base64Image, mimeType, prompt) {
@@ -658,7 +755,9 @@ export class AIAnalysisService {
       available: this.isAvailable(),
       queued: this.autoAnalysisQueue.length,
       active: this.activeAutoAnalyses,
-      maxConcurrent: Math.max(1, Number(this.config.maxConcurrent) || 1)
+      maxConcurrent: Math.max(1, Number(this.config.maxConcurrent) || 1),
+      globalQueued: this.analysisQueue.length,
+      globalActive: this.activeAnalyses
     };
   }
 
@@ -719,6 +818,13 @@ export class AIAnalysisService {
             error: error.message
           });
           this.database?.upsertAnalysisJob(job);
+          if (!this.isAvailable()) {
+            job.status = 'blocked';
+            job.error = 'All AI providers are unavailable. Update the provider configuration before retrying this job.';
+            job.currentPhotoId = null;
+            this.database?.upsertAnalysisJob(job);
+            break;
+          }
         }
 
         job.updatedAt = new Date().toISOString();
@@ -729,10 +835,12 @@ export class AIAnalysisService {
         }
       }
 
-      job.status = 'completed';
-      job.currentPhotoId = null;
-      job.updatedAt = new Date().toISOString();
-      this.database?.upsertAnalysisJob(job);
+      if (job.status !== 'blocked') {
+        job.status = 'completed';
+        job.currentPhotoId = null;
+        job.updatedAt = new Date().toISOString();
+        this.database?.upsertAnalysisJob(job);
+      }
     } catch (error) {
       job.status = 'failed';
       job.error = error.message;

@@ -247,6 +247,11 @@ export class DatabaseService {
         ORDER BY created_at DESC
         LIMIT ?
       `),
+      interruptActiveJobs: this.db.prepare(`
+        UPDATE analysis_jobs
+        SET status = 'interrupted', current_photo_id = NULL, error = ?, updated_at = ?
+        WHERE status IN ('queued', 'running')
+      `),
       upsertSource: this.db.prepare(`
         INSERT INTO sources (
           id, name, type, path, enabled, default_category, use_folder_as_category,
@@ -426,6 +431,10 @@ export class DatabaseService {
 
   getRecentAnalysisJobs(limit = 10) {
     return this.statements.getRecentJobs.all(limit).map(row => this.jobFromRow(row));
+  }
+
+  interruptActiveAnalysisJobs(message = 'Server restarted before the analysis job completed. Retry the unfinished photos.') {
+    return this.statements.interruptActiveJobs.run(message, now()).changes;
   }
 
   upsertSource(source) {

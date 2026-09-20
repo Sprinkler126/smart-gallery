@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useGallery } from './hooks/useGallery';
 import { Photo, ViewMode } from './types';
 import ProtectedImage from './components/ProtectedImage';
@@ -15,8 +15,9 @@ import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Sett
 
 // 妫€娴嬫槸鍚︿负鏈湴璁块棶锛堝彧鏈夋湰鍦版墠鑳界湅鍒扮鐞嗗叆鍙ｏ級
 
-const toolbarButtonClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-400 transition-all hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 disabled:cursor-not-allowed disabled:opacity-50';
-const toolbarButtonActiveClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md bg-gold text-obsidian shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70';
+const toolbarActionClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-400 transition-all hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 disabled:cursor-not-allowed disabled:opacity-50';
+const toolbarActionActiveClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-md bg-gold text-obsidian shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70';
+const toolbarGroupLabelClass = 'inline-flex h-10 items-center px-2 text-xs font-medium tracking-wider text-gray-500 whitespace-nowrap';
 const footerIconButtonClass = 'touch-manipulation inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-gray-400 transition-colors hover:bg-gold hover:text-obsidian focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70';
 
 interface ResetJob {
@@ -139,6 +140,11 @@ const App: React.FC = () => {
   // Hero section state
   const [heroIndex, setHeroIndex] = useState(0);
   const [scrolled, setScrolled] = useState(false);
+  const [isAtPageTop, setIsAtPageTop] = useState(true);
+  const [isGalleryBrowsing, setIsGalleryBrowsing] = useState(false);
+  const [isToolbarVisible, setIsToolbarVisible] = useState(true);
+  const galleryRef = useRef<HTMLElement | null>(null);
+  const toolbarHideTimer = useRef<number | null>(null);
   const [heroPhotos, setHeroPhotos] = useState<Photo[]>([]);
   
   // 棣栭〉绌洪棽妫€娴?- 10绉掓棤鎿嶄綔鑷姩杩涘叆骞荤伅鐗?
@@ -239,10 +245,61 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
+      setIsAtPageTop(window.scrollY <= 4);
+      // The header becomes an edge-revealed floating toolbar only once the
+      // visitor reaches the gallery. Touch users keep it visible.
+      // The header's sticky behaviour is affected by the page's flex layout.
+      // Use the gallery anchor instead, so the floating toolbar has a stable
+      // trigger regardless of viewport size or the header's computed position.
+      const galleryTop = galleryRef.current?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
+      const browsingGallery = window.scrollY > 260 && galleryTop < 120;
+      setIsGalleryBrowsing(browsingGallery);
+      if (!browsingGallery || !window.matchMedia('(hover: hover)').matches) {
+        setIsToolbarVisible(true);
+      } else {
+        setIsToolbarVisible(false);
+      }
     };
+    handleScroll();
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  useEffect(() => () => {
+    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+  }, []);
+
+  // Some browsers do not dispatch a reliable enter event to a transparent
+  // fixed element after a transformed toolbar is hidden. Listen at window
+  // level as well, so the full top-edge zone always wakes the toolbar.
+  useEffect(() => {
+    if (!isGalleryBrowsing || isToolbarVisible || !window.matchMedia('(hover: hover)').matches) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || event.clientY > 96) return;
+      if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+      toolbarHideTimer.current = null;
+      setIsToolbarVisible(true);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    return () => window.removeEventListener('pointermove', handlePointerMove);
+  }, [isGalleryBrowsing, isToolbarVisible]);
+
+  const revealToolbar = () => {
+    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+    toolbarHideTimer.current = null;
+    setIsToolbarVisible(true);
+  };
+  const hideToolbar = () => {
+    if (isGalleryBrowsing && window.matchMedia('(hover: hover)').matches) {
+      if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+      toolbarHideTimer.current = window.setTimeout(() => {
+        setIsToolbarVisible(false);
+        toolbarHideTimer.current = null;
+      }, 420);
+    }
+  };
   
   // ================================================================
   // 棣栭〉绌洪棽妫€娴?- 10绉掓棤鎿嶄綔鑷姩杩涘叆骞荤伅鐗?
@@ -250,7 +307,10 @@ const App: React.FC = () => {
   // ================================================================
   useEffect(() => {
     // 濡傛灉宸茬粡鍦ㄥ够鐏墖妯″紡锛屾垨鎵撳紑浜?Lightbox锛屼笉鎵ц绌洪棽妫€娴?
-    if (showSlideshow || selectedPhotoIndex !== null) return;
+    if (showSlideshow || selectedPhotoIndex !== null || !isAtPageTop) {
+      setHomeIdleSeconds(0);
+      return;
+    }
     
     const IDLE_THRESHOLD = 10; // 10绉?
     
@@ -270,7 +330,7 @@ const App: React.FC = () => {
     }, 1000);
     
     return () => clearInterval(interval);
-  }, [showSlideshow, idlePaused, photos.length, selectedPhotoIndex]);
+  }, [showSlideshow, idlePaused, photos.length, selectedPhotoIndex, isAtPageTop]);
   
   // 鐢ㄦ埛鎿嶄綔鏃堕噸缃椤电┖闂茶鏃?
   useEffect(() => {
@@ -574,18 +634,33 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* 2. Navigation / Sticky Header */}
-      <header className={`sticky top-0 z-40 transition-all duration-300 border-b border-white/5 ${
-        scrolled ? 'bg-obsidian/90 backdrop-blur-md py-2 shadow-lg' : 'bg-obsidian py-4'
-      }`}>
-        <div className="max-w-7xl mx-auto px-3 md:px-6 flex items-center justify-between gap-2">
+      {/* 鼠标贴近上边缘时呼出悬浮工具栏；移动端保持常驻，避免无悬停入口。 */}
+      {isGalleryBrowsing && !isToolbarVisible && (
+        <div
+          className="fixed inset-x-0 top-0 z-50 h-24 cursor-n-resize"
+          onMouseEnter={revealToolbar}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* 2. Navigation / Floating Toolbar */}
+      <header
+        onMouseEnter={revealToolbar}
+        onMouseLeave={hideToolbar}
+        className={`${isGalleryBrowsing
+          ? 'fixed inset-x-2 top-2 z-40 rounded-2xl border border-white/10 shadow-2xl shadow-black/40'
+          : 'sticky top-0 z-40 border-b border-white/5'} transition-[transform,opacity,margin,border-radius,box-shadow,background-color] duration-500 ease-out ${
+          isGalleryBrowsing && !isToolbarVisible ? '-translate-y-[calc(100%+1rem)] opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+        } ${scrolled ? 'bg-obsidian/95 backdrop-blur-md py-2' : 'bg-obsidian py-4'}`}
+      >
+        <div className="max-w-7xl mx-auto px-3 md:px-6 flex items-center justify-between gap-3">
           <div className={`hidden sm:flex flex-col min-w-0 transition-all duration-300 ${scrolled ? 'opacity-100' : 'opacity-0 lg:opacity-100'}`}>
              {scrolled && <span className="font-serif text-lg tracking-tight">{appName}</span>}
           </div>
 
-          <div className="flex flex-1 sm:flex-none flex-wrap sm:flex-nowrap items-center justify-end gap-2 md:gap-4 min-w-0">
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-2 md:flex-nowrap md:gap-3 min-w-0">
             {/* Search Box - 绉诲姩绔畝鍖?*/}
-            <div className="flex basis-full sm:basis-auto flex-1 sm:flex-none items-center gap-1 md:gap-2 bg-white/5 rounded-lg px-2 md:px-3 py-2 sm:py-1.5 min-w-0">
+            <div className="flex basis-full md:basis-auto flex-1 items-center gap-1.5 rounded-xl border border-white/10 bg-black/20 px-2.5 py-2 shadow-inner shadow-black/20 md:max-w-md md:px-3 md:py-1.5">
               <Search size={16} className="text-gray-500 flex-shrink-0" />
               <input
                 type="text"
@@ -593,7 +668,7 @@ const App: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && performSearch()}
                 placeholder="搜索..."
-                className="bg-transparent border-none outline-none text-[16px] sm:text-sm text-white placeholder-gray-500 w-16 sm:w-28 md:w-48 min-w-0"
+                className="min-w-0 flex-1 bg-transparent border-none outline-none text-[16px] sm:text-sm text-white placeholder-gray-500"
               />
               {searchQuery && (
                 <button
@@ -628,79 +703,71 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* View Mode Toggle + Slideshow */}
-            <div className="flex flex-shrink-0 gap-1 bg-white/5 p-1 rounded-lg">
+            {/* 浏览：视图切换与放映 */}
+            <div className="flex flex-shrink-0 gap-1 rounded-xl border border-white/10 bg-white/5 p-1 shadow-sm shadow-black/20">
+              <span className={toolbarGroupLabelClass}>布局</span>
               <button 
                 onClick={() => setViewMode(ViewMode.GRID)}
-                className={viewMode === ViewMode.GRID ? toolbarButtonActiveClass : toolbarButtonClass}
-                title="Grid View"
-                aria-label="Grid View"
+                className={viewMode === ViewMode.GRID ? toolbarActionActiveClass : toolbarActionClass}
+                title="浏览：网格视图"
+                aria-label="网格视图"
               >
                 <Grid size={18} />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.MASONRY)}
-                className={viewMode === ViewMode.MASONRY ? toolbarButtonActiveClass : toolbarButtonClass}
-                title="Masonry View"
-                aria-label="Masonry View"
+                className={viewMode === ViewMode.MASONRY ? toolbarActionActiveClass : toolbarActionClass}
+                title="浏览：瀑布流视图"
+                aria-label="瀑布流视图"
               >
                 <Images size={18} />
               </button>
               <button 
                 onClick={() => setViewMode(ViewMode.TIMELINE)}
-                className={viewMode === ViewMode.TIMELINE ? toolbarButtonActiveClass : toolbarButtonClass}
-                title="Timeline View"
-                aria-label="Timeline View"
+                className={viewMode === ViewMode.TIMELINE ? toolbarActionActiveClass : toolbarActionClass}
+                title="浏览：时间线视图"
+                aria-label="时间线视图"
               >
                 <Clock size={18} />
               </button>
               {/* Slideshow Button */}
               <button
                 onClick={() => openSlideshow(0)}
-                className={`${toolbarButtonClass} ml-1 border-l border-white/10 hover:text-gold`}
-                title="Start Slideshow"
-                aria-label="Start Slideshow"
+                className={`${toolbarActionClass} ml-1 border-l border-white/10 hover:text-gold`}
+                title="浏览：开始放映"
+                aria-label="开始放映"
               >
                 <Play size={18} />
               </button>
             </div>
 
-            {/* Remote-safe tools */}
+            {/* 智能：可供远程访问的分析功能 */}
             {showRemoteTools && (
-              <div className="hidden md:flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 shadow-sm shadow-black/20">
+                <span className={toolbarGroupLabelClass}>智能</span>
                 <button
                   onClick={() => {
                     setAiAnalysisPhoto(undefined);
                     setShowAIAnalysis(true);
                   }}
-                  className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
-                  title="AI Analysis"
-                  aria-label="AI Analysis"
+                  className={`${toolbarActionClass} bg-white/5 hover:text-gold`}
+                  title="智能：AI 分析与批量任务"
+                  aria-label="AI 分析与批量任务"
                 >
                   <Brain size={18} />
                 </button>
               </div>
             )}
 
-            {isApiAvailable && (
-              <button
-                onClick={() => isAdmin ? void logout() : setShowLogin(true)}
-                className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
-                title={isAdmin ? '退出管理员登录' : '管理员登录'}
-                aria-label={isAdmin ? '退出管理员登录' : '管理员登录'}
-              >
-                {isAdmin ? <LogOut size={18} /> : <LogIn size={18} />}
-              </button>
-            )}
-
-            {/* Admin-only tools */}
+            {/* 管理：需要管理员权限 */}
             {showAdminFeatures && (
-              <div className="hidden md:flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 shadow-sm shadow-black/20">
+                <span className={toolbarGroupLabelClass}>管理</span>
                 <button
                   onClick={() => setShowCreativePanel(true)}
-                  className={`${toolbarButtonClass} bg-white/5 hover:text-gold`}
-                  title="Creative Tools"
-                  aria-label="Creative Tools"
+                  className={`${toolbarActionClass} bg-white/5 hover:text-gold`}
+                  title="管理：创作工具"
+                  aria-label="创作工具"
                 >
                   <Sparkles size={18} />
                 </button>
@@ -708,9 +775,9 @@ const App: React.FC = () => {
                 {/* Multi-select Toggle */}
                 <button
                   onClick={toggleMultiSelectMode}
-                  className={isMultiSelectMode ? toolbarButtonActiveClass : `${toolbarButtonClass} bg-white/5`}
-                  title={isMultiSelectMode ? 'Exit multi-select mode' : 'Select multiple photos'}
-                  aria-label={isMultiSelectMode ? 'Exit multi-select mode' : 'Select multiple photos'}
+                  className={isMultiSelectMode ? toolbarActionActiveClass : `${toolbarActionClass} bg-white/5`}
+                  title={isMultiSelectMode ? '管理：退出批量选择' : '管理：批量选择照片'}
+                  aria-label={isMultiSelectMode ? '退出批量选择' : '批量选择照片'}
                   aria-pressed={isMultiSelectMode}
                 >
                   <ListChecks size={18} />
@@ -720,9 +787,9 @@ const App: React.FC = () => {
                 <button
                   onClick={() => refresh()}
                   disabled={isRefreshing}
-                  className={`${toolbarButtonClass} bg-white/5 ${isRefreshing ? 'opacity-50' : ''}`}
-                  title="Refresh Gallery (reload photos)"
-                  aria-label="Refresh Gallery"
+                  className={`${toolbarActionClass} bg-white/5 ${isRefreshing ? 'opacity-50' : ''}`}
+                  title="管理：刷新图库索引"
+                  aria-label="刷新图库索引"
                 >
                   <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
@@ -730,23 +797,34 @@ const App: React.FC = () => {
                 {/* Admin Panel Toggle */}
                 <button
                   onClick={() => setShowAdmin(!showAdmin)}
-                  className={showAdmin ? toolbarButtonActiveClass : `${toolbarButtonClass} bg-white/5`}
-                  title="Admin Panel"
-                  aria-label="Admin Panel"
+                  className={showAdmin ? toolbarActionActiveClass : `${toolbarActionClass} bg-white/5`}
+                  title="管理：打开管理面板"
+                  aria-label="打开管理面板"
                   aria-pressed={showAdmin}
                 >
                   <Settings size={18} />
                 </button>
               </div>
             )}
+
+            {isApiAvailable && (
+              <button
+                onClick={() => isAdmin ? void logout() : setShowLogin(true)}
+                className={`${toolbarActionClass} ml-auto rounded-xl border border-white/10 bg-white/5 shadow-sm shadow-black/20 hover:text-gold`}
+                title={isAdmin ? '退出管理员登录' : '管理员登录'}
+                aria-label={isAdmin ? '退出管理员登录' : '管理员登录'}
+              >
+                {isAdmin ? <LogOut size={18} /> : <LogIn size={18} />}
+              </button>
+            )}
           </div>
         </div>
 
         {/* Categories Navigation */}
         <div className="border-t border-white/5 bg-black/20">
-          <div className="max-w-7xl mx-auto px-3 md:px-6 py-3">
+          <div className="max-w-7xl mx-auto px-3 md:px-6 py-2.5">
             {/* 妗岄潰绔細妯帓鎸夐挳 */}
-            <div className="hidden md:flex flex-wrap items-center gap-x-8 gap-y-2">
+            <div className="hidden md:flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2">
               {categories.map(cat => (
                 <button
                   key={cat}
@@ -826,7 +904,7 @@ const App: React.FC = () => {
       )}
 
       {/* 3. Main Gallery Grid */}
-      <main id="gallery" className="flex-grow p-3 sm:p-4 md:p-6 lg:p-12 max-w-7xl mx-auto w-full min-h-[50vh]">
+      <main ref={galleryRef} id="gallery" className="flex-grow p-3 sm:p-4 md:p-6 lg:p-12 max-w-7xl mx-auto w-full min-h-[50vh]">
         {error && (
           <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
             {error}
