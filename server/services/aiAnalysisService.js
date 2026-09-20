@@ -390,7 +390,10 @@ export class AIAnalysisService {
   }
 
   async performAnalysis(photo, force = false) {
-
+    // Keep the cache key in this execution scope.  `analyzeImage` checks the
+    // cache before a task is queued, but the queue worker is the code that
+    // writes a successful result back to it.
+    const cacheKey = this.getCacheKey(photo.id, photo.originalPath);
     console.log(`🧠 Analyzing image: ${photo.title}${force ? ' (forced re-analysis)' : ''}`);
 
     try {
