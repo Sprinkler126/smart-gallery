@@ -52,7 +52,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'zhipu', name: '智谱 AI', apiEndpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4v-plus', supportsVision: true },
   { id: 'siliconflow', name: '硅基流动', apiEndpoint: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen2.5-VL-72B-Instruct', supportsVision: true },
   { id: 'openrouter', name: 'OpenRouter', apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'google/gemini-2.5-flash', supportsVision: true },
-  { id: 'deepseek', name: 'DeepSeek（仅文本）', apiEndpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat', supportsVision: false, note: '默认模型不接收图片，不能用于照片分析。' },
+  { id: 'deepseek', name: 'DeepSeek', apiEndpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', supportsVision: true, note: 'deepseek-flash 支持图片输入。' },
   { id: 'mimo', name: '小米 MiMo', apiEndpoint: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions', model: 'mimo-v2.5-pro', supportsVision: 'model-dependent', note: '图片能力取决于已开通的模型，请先测试。' },
   { id: 'custom', name: '自定义 OpenAI 兼容接口', apiEndpoint: '', model: '', supportsVision: 'unknown' },
 ];

@@ -33,9 +33,9 @@ export const PROVIDER_PRESETS = {
   },
   deepseek: {
     id: 'deepseek', name: 'DeepSeek',
-    apiEndpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat',
-    supportsVision: false,
-    note: 'DeepSeek 官方默认模型不接收图片，不能用于照片分析；可保留作文字用途。'
+    apiEndpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash',
+    supportsVision: true,
+    note: 'deepseek-flash 支持 OpenAI 兼容的图片输入。'
   },
   mimo: {
     id: 'mimo', name: '小米 MiMo',
