@@ -11,7 +11,7 @@ import ExifFramePanel from './components/ExifFramePanel';
 import PixelStretchPanel from './components/PixelStretchPanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
-import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig, LogIn, LogOut, ShieldCheck } from 'lucide-react';
+import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig, LogIn, LogOut, ShieldCheck, Menu } from 'lucide-react';
 
 // 妫€娴嬫槸鍚︿负鏈湴璁块棶锛堝彧鏈夋湰鍦版墠鑳界湅鍒扮鐞嗗叆鍙ｏ級
 
@@ -143,7 +143,10 @@ const App: React.FC = () => {
   const [isAtPageTop, setIsAtPageTop] = useState(true);
   const [isGalleryBrowsing, setIsGalleryBrowsing] = useState(false);
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
+  const [usesTouchToolbar, setUsesTouchToolbar] = useState(false);
   const galleryRef = useRef<HTMLElement | null>(null);
+  const toolbarRef = useRef<HTMLElement | null>(null);
+  const toolbarLauncherRef = useRef<HTMLButtonElement | null>(null);
   const toolbarHideTimer = useRef<number | null>(null);
   const [heroPhotos, setHeroPhotos] = useState<Photo[]>([]);
   
@@ -241,20 +244,31 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [heroPhotos.length]);
 
+  // Touch devices have no reliable edge-hover state.  In gallery browsing
+  // mode they use a compact launcher instead of keeping the whole toolbar on
+  // screen.
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(hover: none), (pointer: coarse)');
+    const updatePointerMode = () => setUsesTouchToolbar(mediaQuery.matches);
+    updatePointerMode();
+    mediaQuery.addEventListener('change', updatePointerMode);
+    return () => mediaQuery.removeEventListener('change', updatePointerMode);
+  }, []);
+
   // Scroll detection
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
       setIsAtPageTop(window.scrollY <= 4);
-      // The header becomes an edge-revealed floating toolbar only once the
-      // visitor reaches the gallery. Touch users keep it visible.
+      // The header becomes a floating toolbar only once the visitor reaches
+      // the gallery. Desktop uses the top-edge reveal; touch uses a launcher.
       // The header's sticky behaviour is affected by the page's flex layout.
       // Use the gallery anchor instead, so the floating toolbar has a stable
       // trigger regardless of viewport size or the header's computed position.
       const galleryTop = galleryRef.current?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
       const browsingGallery = window.scrollY > 260 && galleryTop < 120;
       setIsGalleryBrowsing(browsingGallery);
-      if (!browsingGallery || !window.matchMedia('(hover: hover)').matches) {
+      if (!browsingGallery) {
         setIsToolbarVisible(true);
       } else {
         setIsToolbarVisible(false);
@@ -263,7 +277,7 @@ const App: React.FC = () => {
     handleScroll();
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [usesTouchToolbar]);
 
   useEffect(() => () => {
     if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
@@ -273,7 +287,7 @@ const App: React.FC = () => {
   // fixed element after a transformed toolbar is hidden. Listen at window
   // level as well, so the full top-edge zone always wakes the toolbar.
   useEffect(() => {
-    if (!isGalleryBrowsing || isToolbarVisible || !window.matchMedia('(hover: hover)').matches) return;
+    if (usesTouchToolbar || !isGalleryBrowsing || isToolbarVisible || !window.matchMedia('(hover: hover)').matches) return;
 
     const handlePointerMove = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse' || event.clientY > 96) return;
@@ -284,7 +298,7 @@ const App: React.FC = () => {
 
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
     return () => window.removeEventListener('pointermove', handlePointerMove);
-  }, [isGalleryBrowsing, isToolbarVisible]);
+  }, [isGalleryBrowsing, isToolbarVisible, usesTouchToolbar]);
 
   const revealToolbar = () => {
     if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
@@ -292,7 +306,7 @@ const App: React.FC = () => {
     setIsToolbarVisible(true);
   };
   const hideToolbar = () => {
-    if (isGalleryBrowsing && window.matchMedia('(hover: hover)').matches) {
+    if (isGalleryBrowsing && !usesTouchToolbar && window.matchMedia('(hover: hover)').matches) {
       if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
       toolbarHideTimer.current = window.setTimeout(() => {
         setIsToolbarVisible(false);
@@ -300,6 +314,21 @@ const App: React.FC = () => {
       }, 420);
     }
   };
+
+  // When a touch user has opened the toolbar, a tap outside it returns to the
+  // compact launcher. Touches inside the toolbar must remain interactive.
+  useEffect(() => {
+    if (!usesTouchToolbar || !isGalleryBrowsing || !isToolbarVisible) return;
+
+    const closeOnOutsideTap = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (toolbarRef.current?.contains(target) || toolbarLauncherRef.current?.contains(target)) return;
+      setIsToolbarVisible(false);
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsideTap, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideTap, true);
+  }, [isGalleryBrowsing, isToolbarVisible, usesTouchToolbar]);
   
   // ================================================================
   // 棣栭〉绌洪棽妫€娴?- 10绉掓棤鎿嶄綔鑷姩杩涘叆骞荤伅鐗?
@@ -634,8 +663,8 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* 鼠标贴近上边缘时呼出悬浮工具栏；移动端保持常驻，避免无悬停入口。 */}
-      {isGalleryBrowsing && !isToolbarVisible && (
+      {/* 桌面端：鼠标贴近上边缘时呼出悬浮工具栏。 */}
+      {isGalleryBrowsing && !isToolbarVisible && !usesTouchToolbar && (
         <div
           className="fixed inset-x-0 top-0 z-50 h-24 cursor-n-resize"
           onMouseEnter={revealToolbar}
@@ -643,8 +672,24 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* 移动端：下滑至图库后收成单一悬浮入口，避免工具栏遮挡图片。 */}
+      {isGalleryBrowsing && !isToolbarVisible && usesTouchToolbar && (
+        <button
+          ref={toolbarLauncherRef}
+          type="button"
+          onClick={revealToolbar}
+          className="fixed right-3 top-3 z-50 inline-flex h-12 min-w-12 items-center justify-center gap-1.5 rounded-full border border-white/15 bg-obsidian/95 px-3 text-gray-100 shadow-xl shadow-black/50 backdrop-blur-md transition-transform duration-200 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
+          aria-label="打开工具栏"
+          title="打开工具栏"
+        >
+          <Menu size={20} />
+          <span className="text-xs font-medium">工具</span>
+        </button>
+      )}
+
       {/* 2. Navigation / Floating Toolbar */}
       <header
+        ref={toolbarRef}
         onMouseEnter={revealToolbar}
         onMouseLeave={hideToolbar}
         className={`${isGalleryBrowsing
