@@ -13,6 +13,7 @@ import orientationService from '../services/orientationService.js';
 import { CreativeService } from '../services/creativeService.js';
 import { ExifFrameService } from '../services/exifFrameService.js';
 import { applyProviderPreset } from '../services/providerPresets.js';
+import { publicPhoto, parsePhotoQuery } from '../services/photoQuery.js';
 
 // Use native fetch (Node.js 18+)
 const fetch = globalThis.fetch || (await import('node-fetch')).default;
@@ -402,40 +403,11 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.get('/photos', (req, res) => {
     try {
-      const {
-        category,
-        sourceId,
-        sortBy = 'date',
-        sortOrder = 'desc',
-        limit,
-        offset = 0
-      } = req.query;
-
-      const result = galleryService.getPhotos({
-        category,
-        sourceId,
-        sortBy,
-        sortOrder,
-        limit: limit ? parseInt(limit) : undefined,
-        offset: parseInt(offset)
-      });
-
-      // Transform photos to API format
-      const photos = result.photos.map(photo => ({
-        id: photo.id,
-        url: `/photowall/api/display/${photo.id}`,
-        previewUrl: `/photowall/api/preview/${photo.id}`,
-        originalUrl: `/photowall/api/image/${photo.id}`,
-        thumbnail: `/photowall/api/thumbnail/${photo.id}`,
-        blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
-        title: photo.title,
-        category: photo.category,
-        date: photo.date,
-        location: photo.location,
-        exif: photo.exif,
-        dimensions: photo.dimensions,
-        sourceId: photo.sourceId
-      }));
+      let options;
+      try { options = parsePhotoQuery(req.query); }
+      catch (error) { return res.status(400).json({ success: false, error: error.message }); }
+      const result = galleryService.getPhotos(options);
+      const photos = result.photos.map(publicPhoto);
 
       res.json({
         success: true,
@@ -459,6 +431,24 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    * GET /api/photos/:id
    * Get a single photo by ID
    */
+  router.get('/photos/ids', (req, res) => {
+    try {
+      const options = parsePhotoQuery(req.query, { paginate: false });
+      const ids = galleryService.database ? galleryService.database.getPhotoIds(options) : galleryService.getPhotos(options).photos.map(photo => photo.id);
+      res.json({ success: true, data: ids });
+    } catch (error) { res.status(400).json({ success: false, error: error.message }); }
+  });
+
+  router.get('/map/points', (req, res) => {
+    let options;
+    try { options = parsePhotoQuery(req.query, { paginate: false }); }
+    catch (error) { return res.status(400).json({ success: false, error: error.message }); }
+    try {
+      if (!galleryService.database) throw new Error('Map view requires the SQLite catalog');
+      res.json({ success: true, data: galleryService.database.getMapPoints(options) });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+  });
+
   router.get('/photos/:id', (req, res) => {
     try {
       const photo = galleryService.getPhoto(req.params.id);
@@ -472,21 +462,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
 
       res.json({
         success: true,
-        data: {
-          id: photo.id,
-          url: `/photowall/api/display/${photo.id}`,
-          previewUrl: `/photowall/api/preview/${photo.id}`,
-          originalUrl: `/photowall/api/image/${photo.id}`,
-          thumbnail: `/photowall/api/thumbnail/${photo.id}`,
-          blurPlaceholder: photo.blurPlaceholder, // LQIP for lazy loading
-          title: photo.title,
-          category: photo.category,
-          date: photo.date,
-          location: photo.location,
-          exif: photo.exif,
-          dimensions: photo.dimensions,
-          sourceId: photo.sourceId
-        }
+        data: publicPhoto(photo)
       });
     } catch (error) {
       res.status(500).json({
@@ -1112,7 +1088,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
       }
 
       // Delete thumbnail from cache
-      await galleryService.imageProcessor.deleteThumbnail(photo.id);
+      await galleryService.imageProcessor.deleteThumbnail(photo);
 
       // Remove from gallery service
       galleryService.removePhoto(photo.id);
@@ -1156,8 +1132,7 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
    */
   router.post('/cache/clean', requireAdmin, async (req, res) => {
     try {
-      const { validHashes } = req.body || {};
-      const cleaned = await galleryService.imageProcessor.cleanupCache(validHashes || []);
+      const cleaned = await galleryService.cleanThumbnailCache();
       res.json({
         success: true,
         message: `Cleaned ${cleaned} cached thumbnails`,

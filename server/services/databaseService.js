@@ -33,6 +33,9 @@ export class DatabaseService {
 
     this.initializeSchema();
     this.prepareStatements();
+    this.catalogStats = null;
+    this.mapSummaries = new Map();
+    this.queryCounts = new Map();
   }
 
   initializeSchema() {
@@ -114,6 +117,16 @@ export class DatabaseService {
     `);
 
     this.migrateAnalysisTableIfNeeded();
+    const columns = new Set(this.db.prepare('PRAGMA table_info(photos)').all().map(column => column.name));
+    for (const [name, type] of [['latitude', 'REAL'], ['longitude', 'REAL'], ['file_size', 'INTEGER'], ['metadata_version', 'INTEGER']]) {
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE photos ADD COLUMN ${name} ${type}`);
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_photos_status_date ON photos(status, date DESC, id);
+      CREATE INDEX IF NOT EXISTS idx_photos_status_category_date ON photos(status, category, date DESC, id);
+      CREATE INDEX IF NOT EXISTS idx_photos_status_gps ON photos(status, latitude, longitude)
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
+    `);
   }
 
   migrateAnalysisTableIfNeeded() {
@@ -160,12 +173,12 @@ export class DatabaseService {
         INSERT INTO photos (
           id, source_id, original_path, relative_path, filename, title, category, date, location,
           exif_json, dimensions_json, thumbnail_path, thumbnail_filename, blur_placeholder,
-          last_modified, status, created_at, updated_at
+          last_modified, latitude, longitude, file_size, metadata_version, status, created_at, updated_at
         )
         VALUES (
           @id, @sourceId, @originalPath, @relativePath, @filename, @title, @category, @date, @location,
           @exifJson, @dimensionsJson, @thumbnailPath, @thumbnailFilename, @blurPlaceholder,
-          @lastModified, 'active', @createdAt, @updatedAt
+          @lastModified, @latitude, @longitude, @fileSize, @metadataVersion, 'active', @createdAt, @updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET
           source_id = excluded.source_id,
@@ -182,11 +195,16 @@ export class DatabaseService {
           thumbnail_filename = excluded.thumbnail_filename,
           blur_placeholder = excluded.blur_placeholder,
           last_modified = excluded.last_modified,
+          latitude = excluded.latitude,
+          longitude = excluded.longitude,
+          file_size = excluded.file_size,
+          metadata_version = excluded.metadata_version,
           status = 'active',
           updated_at = excluded.updated_at
       `),
       getPhotos: this.db.prepare(`SELECT * FROM photos WHERE status = 'active'`),
       getPhoto: this.db.prepare(`SELECT * FROM photos WHERE id = ? AND status = 'active'`),
+      getPhotoByPath: this.db.prepare(`SELECT * FROM photos WHERE original_path = ? AND status = 'active'`),
       removePhoto: this.db.prepare(`DELETE FROM photos WHERE id = ?`),
       removePhotosBySource: this.db.prepare(`DELETE FROM photos WHERE source_id = ?`),
       markMissingPhotosForSource: this.db.prepare(`
@@ -294,11 +312,20 @@ export class DatabaseService {
       thumbnailPath: row.thumbnail_path,
       thumbnailFilename: row.thumbnail_filename,
       blurPlaceholder: row.blur_placeholder,
-      lastModified: row.last_modified
+      lastModified: row.last_modified,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      fileSize: row.file_size,
+      metadataVersion: row.metadata_version
     };
   }
 
+  invalidateCatalog() {
+    this.catalogStats = null; this.mapSummaries.clear(); this.queryCounts.clear();
+  }
+
   upsertPhoto(photo) {
+    this.invalidateCatalog();
     const timestamp = now();
     this.statements.upsertPhoto.run({
       id: photo.id,
@@ -316,6 +343,10 @@ export class DatabaseService {
       thumbnailFilename: photo.thumbnailFilename,
       blurPlaceholder: photo.blurPlaceholder || null,
       lastModified: photo.lastModified,
+      latitude: photo.latitude ?? null,
+      longitude: photo.longitude ?? null,
+      fileSize: photo.fileSize ?? null,
+      metadataVersion: photo.metadataVersion ?? null,
       createdAt: timestamp,
       updatedAt: timestamp
     });
@@ -329,15 +360,104 @@ export class DatabaseService {
     return this.photoFromRow(this.statements.getPhoto.get(id));
   }
 
+  getPhotoByPath(filePath) {
+    return this.photoFromRow(this.statements.getPhotoByPath.get(filePath));
+  }
+
+  upsertPhotos(photos) {
+    this.db.transaction(() => { for (const photo of photos) this.upsertPhoto(photo); })();
+  }
+
+  photoFilter(options = {}) {
+    const conditions = ["status = 'active'"];
+    const params = [];
+    if (options.category && options.category !== 'All') { conditions.push('category = ?'); params.push(options.category); }
+    if (options.sourceId) { conditions.push('source_id = ?'); params.push(options.sourceId); }
+    if (options.q) {
+      conditions.push("(COALESCE(title, '') || ' ' || COALESCE(category, '') || ' ' || COALESCE(location, '') || ' ' || COALESCE(date, '')) LIKE ? ESCAPE '\\'");
+      params.push(`%${options.q.replace(/[\\%_]/g, '\\$&')}%`);
+    }
+    if (options.ids) { conditions.push('id IN (SELECT value FROM json_each(?))'); params.push(JSON.stringify(options.ids)); }
+    if (options.gpsOnly || options.bounds) conditions.push('latitude IS NOT NULL AND longitude IS NOT NULL');
+    if (options.bounds) {
+      const { south, north, west, east } = options.bounds;
+      conditions.push('latitude BETWEEN ? AND ?'); params.push(south, north);
+      conditions.push(west <= east ? 'longitude BETWEEN ? AND ?' : '(longitude >= ? OR longitude <= ?)');
+      params.push(west, east);
+    }
+    return { where: conditions.join(' AND '), params };
+  }
+
+  queryPhotos(options = {}) {
+    const { where, params } = this.photoFilter(options);
+    const sort = { date: 'date', title: 'title COLLATE NOCASE', category: 'category COLLATE NOCASE' }[options.sortBy || 'date'] || 'date';
+    const direction = options.sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const offset = options.offset || 0;
+    const countKey = JSON.stringify([where, params]);
+    let total = this.queryCounts.get(countKey);
+    if (total === undefined) {
+      total = this.db.prepare(`SELECT COUNT(*) AS count FROM photos WHERE ${where}`).get(...params).count;
+      if (this.queryCounts.size >= 32) this.queryCounts.clear();
+      this.queryCounts.set(countKey, total);
+    }
+    const limit = options.limit ?? total;
+    const rows = this.db.prepare(`SELECT * FROM photos WHERE ${where} ORDER BY ${sort} ${direction}, id ASC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    return { photos: rows.map(row => this.photoFromRow(row)), total, offset, limit };
+  }
+
+  getPhotoIds(options = {}) {
+    const { where, params } = this.photoFilter(options);
+    return this.db.prepare(`SELECT id FROM photos WHERE ${where} ORDER BY date DESC, id ASC`).all(...params).map(row => row.id);
+  }
+
+  getCatalogStats() {
+    if (this.catalogStats) return this.catalogStats;
+    const counts = column => Object.fromEntries(this.db.prepare(`SELECT ${column} AS name, COUNT(*) AS count FROM photos WHERE status = 'active' GROUP BY ${column}`).all().map(row => [row.name, row.count]));
+    this.catalogStats = {
+      totalPhotos: this.db.prepare("SELECT COUNT(*) AS count FROM photos WHERE status = 'active'").get().count,
+      categories: counts('category'), sources: counts('source_id')
+    };
+    return this.catalogStats;
+  }
+
+  getMapPoints(options = {}) {
+    const base = this.photoFilter({ ...options, bounds: undefined });
+    const located = this.photoFilter({ ...options, bounds: undefined, gpsOnly: true });
+    const count = filter => this.db.prepare(`SELECT COUNT(*) AS count FROM photos WHERE ${filter.where}`).get(...filter.params).count;
+    const key = JSON.stringify([located.where, located.params]);
+    let summary = this.mapSummaries.get(key);
+    if (!summary) {
+      const total = count(base);
+      const locatedTotal = count(located);
+      const extent = this.db.prepare(`SELECT MIN(latitude) AS south, MAX(latitude) AS north, MIN(longitude) AS west, MAX(longitude) AS east FROM photos WHERE ${located.where}`).get(...located.params);
+      summary = { total, locatedTotal, unlocatedTotal: total - locatedTotal, extent: locatedTotal ? extent : null };
+      if (this.mapSummaries.size >= 32) this.mapSummaries.clear();
+      this.mapSummaries.set(key, summary);
+    }
+    const viewport = this.photoFilter({ ...options, gpsOnly: true, bounds: options.bounds });
+    const step = 360 / (2 ** Math.min(19, Math.max(0, options.zoom ?? 2))) * 0.4;
+    const points = this.db.prepare(`
+      WITH clusters AS (SELECT CAST(FLOOR((latitude + 90) / ?) AS INTEGER) AS y, CAST(FLOOR((longitude + 180) / ?) AS INTEGER) AS x,
+        AVG(latitude) AS latitude, AVG(longitude) AS longitude, COUNT(*) AS count, MIN(id) AS id,
+        MIN(latitude) AS south, MAX(latitude) AS north, MIN(longitude) AS west, MAX(longitude) AS east
+      FROM photos WHERE ${viewport.where} GROUP BY y, x)
+      SELECT clusters.*, photos.last_modified AS version FROM clusters JOIN photos ON photos.id = clusters.id
+    `).all(step, step, ...viewport.params);
+    return { points, ...summary };
+  }
+
   removePhoto(id) {
+    this.invalidateCatalog();
     this.statements.removePhoto.run(id);
   }
 
   removePhotosBySource(sourceId) {
+    this.invalidateCatalog();
     this.statements.removePhotosBySource.run(sourceId);
   }
 
   markMissingPhotosForSource(sourceId, activeIds) {
+    this.invalidateCatalog();
     const idsJson = JSON.stringify(activeIds);
     this.statements.markMissingPhotosForSource.run(now(), sourceId, idsJson);
   }

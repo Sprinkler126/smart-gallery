@@ -21,6 +21,7 @@ export class GalleryService extends EventEmitter {
     this.supportedFormats = config.supportedFormats || ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif'];
     this.isScanning = false;
     this.lastScanTime = null;
+    this.scans = new Map();
   }
 
   /**
@@ -30,12 +31,7 @@ export class GalleryService extends EventEmitter {
     console.log('🖼️  Initializing Gallery Service...');
 
     if (this.database) {
-      for (const photo of this.database.getPhotos()) {
-        this.photos.set(photo.id, photo);
-      }
-      if (this.photos.size > 0) {
-        console.log(`   Loaded ${this.photos.size} photos from SQLite catalog`);
-      }
+      console.log(`   SQLite catalog contains ${this.database.getCatalogStats().totalPhotos} photos`);
     }
     
     for (const source of this.config.imageSources) {
@@ -50,6 +46,8 @@ export class GalleryService extends EventEmitter {
         this.refreshAll();
       }, this.config.autoRefreshInterval);
     }
+
+    if (this.imageProcessor.thumbnailConfig.autoClean) await this.cleanThumbnailCache();
 
     console.log(`✅ Gallery Service initialized with ${this.sources.size} sources`);
   }
@@ -159,6 +157,13 @@ export class GalleryService extends EventEmitter {
    * Scan a single source for images
    */
   async scanSource(sourceId) {
+    if (this.scans.has(sourceId)) return this.scans.get(sourceId);
+    const task = this.performScan(sourceId);
+    this.scans.set(sourceId, task);
+    try { return await task; } finally { this.scans.delete(sourceId); }
+  }
+
+  async performScan(sourceId) {
     const source = this.sources.get(sourceId);
     if (!source) {
       throw new Error(`Source not found: ${sourceId}`);
@@ -176,7 +181,9 @@ export class GalleryService extends EventEmitter {
       );
 
       const activeIds = new Set(images.map(image => image.id));
-      for (const [photoId, photo] of this.photos) {
+      const existingIds = this.database ? this.database.getPhotoIds({ sourceId }) : [...this.photos.values()].filter(photo => photo.sourceId === sourceId).map(photo => photo.id);
+      for (const photoId of existingIds) {
+        const photo = this.database ? { sourceId } : this.photos.get(photoId);
         if (photo.sourceId === sourceId && !activeIds.has(photoId)) {
           this.photos.delete(photoId);
           this.emit('photoRemoved', photoId);
@@ -185,9 +192,10 @@ export class GalleryService extends EventEmitter {
 
       // Update photos map
       for (const image of images) {
-        this.photos.set(image.id, image);
-        this.database?.upsertPhoto(image);
+        if (!this.database) this.photos.set(image.id, image);
       }
+
+      this.database?.upsertPhotos(images.filter(image => image.catalogChanged));
 
       this.database?.markMissingPhotosForSource(sourceId, [...activeIds]);
 
@@ -236,6 +244,15 @@ export class GalleryService extends EventEmitter {
       } else if (this.isImageFile(item.name)) {
         try {
           const category = currentCategory || defaultCategory;
+          const previous = this.database?.getPhotoByPath(fullPath) || [...this.photos.values()].find(photo => photo.originalPath === fullPath);
+          const fileStats = await fs.stat(fullPath);
+          // Catalog metadata and generated files can be reused until the source or processing format changes.
+          if (previous?.metadataVersion === 1 && previous.sourceId === sourceId && previous.category === category
+            && previous.lastModified === fileStats.mtime.toISOString() && previous.fileSize === fileStats.size
+            && await fs.pathExists(previous.thumbnailPath)) {
+            results.push(previous);
+            continue;
+          }
           const photo = await this.imageProcessor.processImage(fullPath, {
             sourceId,
             category,
@@ -243,6 +260,7 @@ export class GalleryService extends EventEmitter {
           });
           // Skip unsupported formats (photo is null)
           if (photo) {
+            photo.catalogChanged = true;
             results.push(photo);
           }
         } catch (error) {
@@ -287,8 +305,8 @@ export class GalleryService extends EventEmitter {
         return;
       }
 
-      const existed = this.photos.has(photo.id);
-      this.photos.set(photo.id, photo);
+      const existed = !!this.getPhoto(photo.id);
+      if (!this.database) this.photos.set(photo.id, photo);
       this.database?.upsertPhoto(photo);
       if (!existed) {
         source.photoCount++;
@@ -305,18 +323,6 @@ export class GalleryService extends EventEmitter {
    * Process a changed image
    */
   async processChangedImage(sourceId, filePath) {
-    // Find and update existing photo
-    for (const [photoId, photo] of this.photos) {
-      if (photo.originalPath === filePath) {
-        await this.processNewImage(sourceId, filePath);
-        const updatedPhoto = this.photos.get(photoId);
-        if (updatedPhoto) {
-          this.emit('photoUpdated', updatedPhoto);
-        }
-        return;
-      }
-    }
-    // If not found, treat as new
     await this.processNewImage(sourceId, filePath);
   }
 
@@ -324,6 +330,11 @@ export class GalleryService extends EventEmitter {
    * Remove an image from the gallery
    */
   removeImage(sourceId, filePath) {
+    if (this.database) {
+      const photo = this.database.getPhotoByPath(filePath);
+      if (photo?.sourceId === sourceId) this.removePhoto(photo.id);
+      return;
+    }
     for (const [photoId, photo] of this.photos) {
       if (photo.originalPath === filePath && photo.sourceId === sourceId) {
         this.photos.delete(photoId);
@@ -362,10 +373,19 @@ export class GalleryService extends EventEmitter {
     }
   }
 
+  async cleanThumbnailCache() {
+    const filenames = this.database
+      ? this.database.db.prepare("SELECT thumbnail_filename FROM photos WHERE status = 'active'").all().map(row => row.thumbnail_filename)
+      : [...this.photos.values()].map(photo => photo.thumbnailFilename);
+    const hashes = filenames.map(filename => /^thumb_([a-f0-9]{32})\./.exec(filename || '')?.[1]).filter(Boolean);
+    return this.imageProcessor.cleanupCache(hashes);
+  }
+
   /**
    * Get all photos, optionally filtered
    */
   getPhotos(options = {}) {
+    if (this.database) return this.database.queryPhotos(options);
     const { category, sourceId, sortBy = 'date', sortOrder = 'desc', limit, offset = 0 } = options;
     
     let photos = Array.from(this.photos.values());
@@ -421,19 +441,14 @@ export class GalleryService extends EventEmitter {
    * Get a single photo by ID
    */
   getPhoto(photoId) {
-    const photo = this.photos.get(photoId);
-    if (photo) return photo;
-    const persisted = this.database?.getPhoto(photoId);
-    if (persisted) {
-      this.photos.set(photoId, persisted);
-    }
-    return persisted;
+    return this.database ? this.database.getPhoto(photoId) : this.photos.get(photoId);
   }
 
   /**
    * Get all categories
    */
   getCategories() {
+    if (this.database) return ['All', ...Object.keys(this.database.getCatalogStats().categories).sort()];
     const categories = new Set();
     for (const photo of this.photos.values()) {
       categories.add(photo.category);
@@ -452,6 +467,7 @@ export class GalleryService extends EventEmitter {
    * Get gallery statistics
    */
   getStats() {
+    if (this.database) return { ...this.database.getCatalogStats(), totalSources: this.sources.size, lastScanTime: this.lastScanTime, isScanning: this.isScanning || this.scans.size > 0 };
     const categories = {};
     const sources = {};
 
@@ -519,7 +535,7 @@ export class GalleryService extends EventEmitter {
    * Remove a photo from the gallery (called after file deletion)
    */
   removePhoto(photoId) {
-    const photo = this.photos.get(photoId);
+    const photo = this.getPhoto(photoId);
     if (photo) {
       this.photos.delete(photoId);
       this.database?.removePhoto(photoId);

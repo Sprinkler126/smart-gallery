@@ -1,9 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
 import { useGallery } from './hooks/useGallery';
 import { Photo, ViewMode } from './types';
 import ProtectedImage from './components/ProtectedImage';
 import Lightbox from './components/Lightbox';
-import TimelineView from './components/TimelineView';
+import VirtualPhotoGrid from './components/VirtualPhotoGrid';
+import GalleryLoadMore from './components/GalleryLoadMore';
+import type { SavedMapView } from './components/PhotoMapView';
 import AdminPanel from './components/AdminPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
 import CreativePanel from './components/CreativePanel';
@@ -11,7 +13,9 @@ import ExifFramePanel from './components/ExifFramePanel';
 import PixelStretchPanel from './components/PixelStretchPanel';
 import Slideshow from './components/Slideshow';
 import { adminFetch } from './services/adminAuth';
-import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig, LogIn, LogOut, ShieldCheck, Menu } from 'lucide-react';
+import { Grid, Images, Search, ChevronDown, Camera, Instagram, Mail, Clock, Settings, RefreshCw, Wifi, WifiOff, Loader2, Play, Check, Square, Trash2, X, Brain, Sparkles, ListChecks, SquareCheckBig, LogIn, LogOut, ShieldCheck, Menu, MapPin } from 'lucide-react';
+
+const PhotoMapView = lazy(() => import('./components/PhotoMapView'));
 
 // 妫€娴嬫槸鍚︿负鏈湴璁块棶锛堝彧鏈夋湰鍦版墠鑳界湅鍒扮鐞嗗叆鍙ｏ級
 
@@ -103,6 +107,7 @@ const App: React.FC = () => {
     setSearchMode,
     performSearch,
     clearSearch,
+    totalPhotos, hasMore, isLoadingMore, loadMore, getAllPhotos, getAllPhotoIds, query, revision,
   } = useGallery({
     enableRealtime: true,
     autoRefresh: false,
@@ -120,6 +125,16 @@ const App: React.FC = () => {
   // Slideshow state
   const [showSlideshow, setShowSlideshow] = useState(false);
   const [slideshowIndex, setSlideshowIndex] = useState(0);
+  const [slideshowPhotos, setSlideshowPhotos] = useState<Photo[]>([]);
+  const [isPreparingSlideshow, setIsPreparingSlideshow] = useState(false);
+  const slideshowRequest = useRef(0);
+  const [mapPhoto, setMapPhoto] = useState<Photo | null>(null);
+  const savedMapView = useRef<SavedMapView | null>(null);
+  const latestQuery = useRef(query);
+  latestQuery.current = query;
+  const startSlideshow = useRef<(index: number) => Promise<void>>(async () => {});
+  const slideshowBusy = useRef(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   
   // AI Analysis state
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
@@ -204,36 +219,15 @@ const App: React.FC = () => {
 
   // 鑾峰彇妯浘鐢ㄤ簬棣栭〉 Hero 灞曠ず
   useEffect(() => {
-    if (photos.length === 0) return;
-    
-    const fetchOrientations = async () => {
-      try {
-        const res = await fetch('/photowall/api/orientations');
-        const data = await res.json();
-        if (!data.success) return;
-        
-        const orientations = data.orientations as Record<string, 'landscape' | 'portrait' | 'square'>;
-        // 鍙€夋í鍥撅紙landscape 鎴?square锛?
-        const landscapePhotos = photos.filter(p => {
-          const o = orientations[p.id];
-          return o === 'landscape' || o === 'square';
-        });
-        
-        // 濡傛灉娌℃湁妯浘锛宖allback 鍒版墍鏈夌収鐗?
-        const pool = landscapePhotos.length > 0 ? landscapePhotos : photos;
-        
-        // 闅忔満鎵撲贡鍙栧墠 5 寮?
-        const shuffled = [...pool].sort(() => Math.random() - 0.5);
-        setHeroPhotos(shuffled.slice(0, Math.min(5, shuffled.length)));
-        setHeroIndex(0);
-      } catch {
-        // fallback: 鐢ㄦ墍鏈夌収鐗?
-        setHeroPhotos(photos.slice(0, 5));
-      }
-    };
-    
-    fetchOrientations();
-  }, [photos]);
+    if (heroPhotos.length || !photos.length) return;
+    const landscape = photos.filter(photo => !photo.dimensions || photo.dimensions.width >= photo.dimensions.height);
+    setHeroPhotos((landscape.length ? landscape : photos).slice(0, 5));
+  }, [photos, heroPhotos.length]);
+
+  useEffect(() => {
+    setSelectedPhotoIndex(null); setMapPhoto(null); setSelectedPhotos(new Set());
+    slideshowRequest.current++; slideshowBusy.current = false; setIsPreparingSlideshow(false);
+  }, [query, revision]);
 
   // Hero Image Auto-Rotation - 12绉掑垏鎹竴娆?
   useEffect(() => {
@@ -350,8 +344,7 @@ const App: React.FC = () => {
         const next = prev + 1;
         if (next >= IDLE_THRESHOLD) {
           // 杈惧埌闃堝€硷紝鑷姩杩涘叆骞荤伅鐗?
-          setSlideshowIndex(0);
-          setShowSlideshow(true);
+          void startSlideshow.current(0);
           return 0;
         }
         return next;
@@ -370,11 +363,12 @@ const App: React.FC = () => {
     return () => events.forEach((e) => window.removeEventListener(e, handler));
   }, []);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (selectedPhotoIndex === null) return;
-    if (selectedPhotoIndex < filteredPhotos.length - 1) {
-      setSelectedPhotoIndex(selectedPhotoIndex + 1);
-    }
+    const snapshot = query;
+    if (selectedPhotoIndex === filteredPhotos.length - 1 && hasMore && !await loadMore()) return;
+    if (snapshot !== latestQuery.current) return;
+    if (selectedPhotoIndex < totalPhotos - 1) setSelectedPhotoIndex(selectedPhotoIndex + 1);
   };
 
   const handlePrev = () => {
@@ -472,8 +466,13 @@ const App: React.FC = () => {
     });
   };
 
-  const selectAll = () => {
-    setSelectedPhotos(new Set(filteredPhotos.map((p) => p.id)));
+  const selectAll = async () => {
+    const snapshot = query;
+    try {
+      const ids = await getAllPhotoIds();
+      if (snapshot === latestQuery.current) setSelectedPhotos(new Set(ids));
+    }
+    catch (error) { setActionError((error as Error).message); }
   };
 
   const deselectAll = () => {
@@ -521,10 +520,20 @@ const App: React.FC = () => {
     }
   };
 
-  const openSlideshow = (startIndex: number = 0) => {
-    setSlideshowIndex(startIndex);
-    setShowSlideshow(true);
+  const openSlideshow = async (startIndex: number = 0) => {
+    if (slideshowBusy.current || showSlideshow) return;
+    slideshowBusy.current = true;
+    const request = ++slideshowRequest.current;
+    setIsPreparingSlideshow(true); setActionError(null);
+    try {
+      const allPhotos = await getAllPhotos();
+      if (request !== slideshowRequest.current) return;
+      setSlideshowPhotos(allPhotos); setSlideshowIndex(startIndex); setShowSlideshow(true);
+    } catch (error) { if (request === slideshowRequest.current) setActionError((error as Error).message); }
+    finally { if (request === slideshowRequest.current) { slideshowBusy.current = false; setIsPreparingSlideshow(false); } }
   };
+
+  startSlideshow.current = openSlideshow;
 
   const scrollToGallery = () => {
     document.getElementById('gallery')?.scrollIntoView({ behavior: 'smooth' });
@@ -775,14 +784,20 @@ const App: React.FC = () => {
               >
                 <Clock size={18} />
               </button>
+              {isApiAvailable && <button onClick={() => setViewMode(ViewMode.MAP)}
+                className={viewMode === ViewMode.MAP ? toolbarActionActiveClass : toolbarActionClass}
+                title="浏览：地图相册" aria-label="地图相册" aria-pressed={viewMode === ViewMode.MAP}>
+                <MapPin size={18} />
+              </button>}
               {/* Slideshow Button */}
               <button
-                onClick={() => openSlideshow(0)}
+                onClick={() => void openSlideshow(0)}
+                disabled={isPreparingSlideshow}
                 className={`${toolbarActionClass} ml-1 border-l border-white/10 hover:text-gold`}
                 title="浏览：开始放映"
                 aria-label="开始放映"
               >
-                <Play size={18} />
+                {isPreparingSlideshow ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
               </button>
             </div>
 
@@ -950,13 +965,20 @@ const App: React.FC = () => {
 
       {/* 3. Main Gallery Grid */}
       <main ref={galleryRef} id="gallery" className="flex-grow p-3 sm:p-4 md:p-6 lg:p-12 max-w-7xl mx-auto w-full min-h-[50vh]">
-        {error && (
+        {(error || actionError) && (
           <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-            {error}
+            {error || actionError}
+            {error && <button onClick={() => void reload().catch(() => {})} className="ml-3 text-gold">重新加载</button>}
           </div>
         )}
 
-        {filteredPhotos.length === 0 ? (
+        {viewMode === ViewMode.MAP ? (
+          <Suspense fallback={<div className="flex justify-center py-24"><Loader2 className="animate-spin text-gold" /></div>}>
+            <PhotoMapView query={query} revision={revision} isApiAvailable={isApiAvailable} savedView={savedMapView} onOpenPhoto={setMapPhoto} />
+          </Suspense>
+        ) : filteredPhotos.length === 0 && isLoadingMore ? (
+          <div className="flex justify-center py-24"><Loader2 className="animate-spin text-gold" /></div>
+        ) : filteredPhotos.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-600">
             <Search size={48} strokeWidth={1} className="mb-4 opacity-50"/>
             {searchResults !== null ? (
@@ -988,17 +1010,10 @@ const App: React.FC = () => {
           </div>
         ) : (
           <>
-            {viewMode === ViewMode.TIMELINE ? (
-              <TimelineView 
-                photos={filteredPhotos} 
-                onPhotoClick={(photo, index) => setSelectedPhotoIndex(filteredPhotos.indexOf(photo))}
-              />
-            ) : (
-              <div className={viewMode === ViewMode.MASONRY ? 'columns-1 sm:columns-2 lg:columns-3 gap-3 md:gap-6 space-y-3 md:space-y-6' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6'}>
-                {filteredPhotos.map((photo, index) => (
+            <VirtualPhotoGrid photos={filteredPhotos} mode={viewMode} renderPhoto={(photo, index) => (
                   <div 
                     key={photo.id} 
-                    className={`break-inside-avoid relative group cursor-pointer rounded-md sm:rounded-sm overflow-hidden bg-charcoal shadow-lg transition-transform duration-500 hover:-translate-y-1 ${viewMode === ViewMode.MASONRY ? 'mb-3 md:mb-6' : ''} ${
+                    className={`break-inside-avoid relative group cursor-pointer rounded-md sm:rounded-sm overflow-hidden bg-charcoal shadow-lg transition-transform duration-500 hover:-translate-y-1 h-full ${
                       selectedPhotos.has(photo.id) ? 'ring-2 ring-gold ring-offset-2 ring-offset-obsidian' : ''
                     }`}
                     onClick={(e) => {
@@ -1048,14 +1063,9 @@ const App: React.FC = () => {
                       src={photo.thumbnail || photo.url} 
                       blurPlaceholder={photo.blurPlaceholder}
                       alt={photo.title}
-                      aspectRatio={photo.dimensions ? `${photo.dimensions.width}/${photo.dimensions.height}` : undefined}
-                      onClick={() => {
-                        if (isMultiSelectMode) {
-                          togglePhotoSelection(photo.id);
-                        } else {
-                          setSelectedPhotoIndex(index);
-                        }
-                      }}
+                      className="h-full w-full"
+                      aspectRatio={viewMode === ViewMode.TIMELINE ? '1' : photo.dimensions ? `${photo.dimensions.width}/${photo.dimensions.height}` : '3/2'}
+
                     />
                     
                     {/* Hover/Tap Overlay Info */}
@@ -1087,9 +1097,8 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+            )} />
+            <GalleryLoadMore hasMore={hasMore} loading={isLoadingMore} error={error} count={filteredPhotos.length} total={totalPhotos} loadMore={loadMore} />
           </>
         )}
       </main>
@@ -1192,13 +1201,13 @@ const App: React.FC = () => {
       )}
 
       {/* Lightbox Modal */}
-      {selectedPhotoIndex !== null && (
+      {selectedPhotoIndex !== null && filteredPhotos[selectedPhotoIndex] && (
         <Lightbox
           photo={filteredPhotos[selectedPhotoIndex]}
           onClose={() => setSelectedPhotoIndex(null)}
           onNext={handleNext}
           onPrev={handlePrev}
-          hasNext={selectedPhotoIndex < filteredPhotos.length - 1}
+          hasNext={selectedPhotoIndex < totalPhotos - 1}
           hasPrev={selectedPhotoIndex > 0}
           onDelete={showAdminFeatures ? handleDeletePhoto : undefined}
           onAIAnalysis={() => {
@@ -1215,12 +1224,19 @@ const App: React.FC = () => {
       )}
 
       {/* Slideshow Modal */}
+      {mapPhoto && <Lightbox photo={mapPhoto} onClose={() => setMapPhoto(null)} onNext={() => {}} onPrev={() => {}}
+        hasNext={false} hasPrev={false}
+        onDelete={showAdminFeatures ? async id => { await handleDeletePhoto(id); setMapPhoto(null); } : undefined}
+        onAIAnalysis={showRemoteTools ? () => { setAiAnalysisPhoto(mapPhoto); setShowAIAnalysis(true); } : undefined}
+        onExifFrame={() => setExifFramePhoto(mapPhoto)}
+        onPixelStretch={() => setPixelStretchPhotoId(mapPhoto.id)} />}
       {showSlideshow && (
         <Slideshow
-          photos={filteredPhotos}
+          photos={slideshowPhotos}
           initialIndex={slideshowIndex}
           onClose={() => {
             setShowSlideshow(false);
+            setSlideshowPhotos([]);
             setHomeIdleSeconds(0); // 鍏抽棴骞荤伅鐗囧悗閲嶇疆绌洪棽璁℃椂
           }}
         />
@@ -1243,7 +1259,7 @@ const App: React.FC = () => {
 
       {pixelStretchPhotoId && (
         <PixelStretchPanel
-          photos={photos}
+          photos={mapPhoto && !photos.some(photo => photo.id === mapPhoto.id) ? [mapPhoto, ...photos] : photos}
           initialPhotoId={pixelStretchPhotoId}
           onClose={() => setPixelStretchPhotoId(null)}
         />

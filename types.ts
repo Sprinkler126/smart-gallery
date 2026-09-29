@@ -9,6 +9,8 @@ export interface Photo {
   category: string;
   date: string;
   location?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   exif?: {
     camera?: string;
     lens?: string;
@@ -56,5 +58,6 @@ export interface AIAnalysisResult {
 export enum ViewMode {
   GRID = 'GRID',
   MASONRY = 'MASONRY',
-  TIMELINE = 'TIMELINE'
+  TIMELINE = 'TIMELINE',
+  MAP = 'MAP'
 }

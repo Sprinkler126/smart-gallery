@@ -44,6 +44,47 @@ export interface ImageSource {
   watch: boolean;
 }
 
+export interface PhotoQuery {
+  category?: string;
+  sourceId?: string;
+  q?: string;
+  ids?: string[];
+  south?: number;
+  north?: number;
+  west?: number;
+  east?: number;
+}
+
+export interface MapPoint {
+  id: string;
+  version?: string;
+  x: number;
+  y: number;
+  latitude: number;
+  longitude: number;
+  count: number;
+  south: number;
+  north: number;
+  west: number;
+  east: number;
+}
+
+export interface MapResponse {
+  points: MapPoint[];
+  total: number;
+  locatedTotal: number;
+  unlocatedTotal: number;
+  extent: { south: number; north: number; west: number; east: number } | null;
+}
+
+function queryParams(options: object) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined) params.set(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
+  }
+  return params;
+}
+
 export interface GalleryStats {
   totalPhotos: number;
   totalSources: number;
@@ -92,13 +133,13 @@ class GalleryApiService {
 
       const data = await response.json();
       
-      if (!response.ok) {
+      if (!response.ok || !data.success) {
         throw new Error(data.error || `HTTP error ${response.status}`);
       }
 
       return data;
     } catch (error) {
-      console.error(`API Error (${endpoint}):`, error);
+      if ((error as Error).name !== 'AbortError') console.error(`API Error (${endpoint}):`, error);
       throw error;
     }
   }
@@ -106,31 +147,18 @@ class GalleryApiService {
   // ==================== PHOTOS ====================
 
   /**
-   * Fetch all photos with optional filtering
+   * Fetch one catalog page with optional filtering
    */
-  async getPhotos(options: {
-    category?: string;
-    sourceId?: string;
+  async getPhotos(options: PhotoQuery & {
     sortBy?: 'date' | 'title' | 'category';
     sortOrder?: 'asc' | 'desc';
     limit?: number;
     offset?: number;
-  } = {}): Promise<PhotosResponse> {
-    const params = new URLSearchParams();
-    
-    if (options.category && options.category !== 'All') {
-      params.append('category', options.category);
-    }
-    if (options.sourceId) params.append('sourceId', options.sourceId);
-    if (options.sortBy) params.append('sortBy', options.sortBy);
-    if (options.sortOrder) params.append('sortOrder', options.sortOrder);
-    if (options.limit) params.append('limit', options.limit.toString());
-    if (options.offset) params.append('offset', options.offset.toString());
-
-    const queryString = params.toString();
+  } = {}, signal?: AbortSignal): Promise<PhotosResponse> {
+    const queryString = queryParams(options).toString();
     const endpoint = `/photos${queryString ? `?${queryString}` : ''}`;
     
-    const response = await this.request<Photo[]>(endpoint);
+    const response = await this.request<Photo[]>(endpoint, { signal });
     
     return {
       photos: response.data || [],
@@ -146,9 +174,20 @@ class GalleryApiService {
   /**
    * Get a single photo by ID
    */
+  async getPhotoIds(query: PhotoQuery): Promise<string[]> {
+    const response = await this.request<string[]>(`/photos/ids?${queryParams(query)}`);
+    return response.data || [];
+  }
+
+  async getMapPoints(query: PhotoQuery & { zoom?: number }, signal?: AbortSignal): Promise<MapResponse> {
+    const response = await this.request<MapResponse>(`/map/points?${queryParams(query)}`, { signal });
+    if (!response.data) throw new Error('地图数据为空');
+    return response.data;
+  }
+
   async getPhoto(id: string): Promise<Photo | null> {
     try {
-      const response = await this.request<Photo>(`/photos/${id}`);
+      const response = await this.request<Photo>(`/photos/${encodeURIComponent(id)}`);
       return response.data || null;
     } catch {
       return null;

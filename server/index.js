@@ -3,6 +3,7 @@
  * Express server with real-time image source management
  */
 
+import { publicPhoto } from './services/photoQuery.js';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
@@ -163,20 +164,7 @@ console.log('   Model: Universal Sentence Encoder (local)');
 
 // Set up real-time events
 galleryService.on('photoAdded', (photo) => {
-  io.emit('photo:added', {
-    id: photo.id,
-    url: `/photowall/api/image/${photo.id}`,
-    previewUrl: `/photowall/api/preview/${photo.id}`,
-    originalUrl: `/photowall/api/image/${photo.id}`,
-    thumbnail: `/photowall/api/thumbnail/${photo.id}`,
-    title: photo.title,
-    category: photo.category,
-    date: photo.date,
-    location: photo.location,
-    exif: photo.exif,
-    dimensions: photo.dimensions,
-    sourceId: photo.sourceId
-  });
+  io.emit('photo:added', publicPhoto(photo));
 
   const autoAnalysis = aiAnalysisService.enqueueAutoAnalysis(photo, {
     onStart: (queuedPhoto) => {
@@ -222,20 +210,7 @@ galleryService.on('photoRemoved', (photoId) => {
 });
 
 galleryService.on('photoUpdated', (photo) => {
-  io.emit('photo:updated', {
-    id: photo.id,
-    url: `/photowall/api/image/${photo.id}`,
-    previewUrl: `/photowall/api/preview/${photo.id}`,
-    originalUrl: `/photowall/api/image/${photo.id}`,
-    thumbnail: `/photowall/api/thumbnail/${photo.id}`,
-    title: photo.title,
-    category: photo.category,
-    date: photo.date,
-    location: photo.location,
-    exif: photo.exif,
-    dimensions: photo.dimensions,
-    sourceId: photo.sourceId
-  });
+  io.emit('photo:updated', publicPhoto(photo));
 });
 
 galleryService.on('scanStart', (sourceId) => {

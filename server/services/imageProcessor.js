@@ -9,6 +9,16 @@ import fs from 'fs-extra';
 import path from 'path';
 import crypto from 'crypto';
 
+async function writeCachedImage(pipeline, destination) {
+  const temporary = `${destination}.${crypto.randomUUID()}.tmp`;
+  try {
+    await pipeline.toFile(temporary);
+    await fs.move(temporary, destination, { overwrite: true });
+  } finally {
+    await fs.remove(temporary);
+  }
+}
+
 export class ImageProcessor {
   constructor(config) {
     // Use __dirname to ensure absolute path regardless of working directory
@@ -27,14 +37,12 @@ export class ImageProcessor {
       : path.resolve(process.cwd(), this.thumbnailConfig.cacheDir);
     this.thumbnailConfig.cacheDir = this.cacheDir;
     this.cacheIndex = new Map(); // Track cache usage
+    this.thumbnailInFlight = new Map();
     this.previewInFlight = new Map();
     this.displayInFlight = new Map();
     fs.ensureDirSync(this.cacheDir);
     
-    // Auto-clean cache on startup if enabled
-    if (this.thumbnailConfig.autoClean) {
-      this.cleanupOldCache();
-    }
+    // Active thumbnails belong to the catalog. Cleanup runs after indexing, using catalog references.
   }
 
   /**
@@ -110,6 +118,7 @@ export class ImageProcessor {
 
       // Check if thumbnail already exists and is valid
       if (await fs.pathExists(thumbPath)) {
+        if (this.thumbnailInFlight.has(thumbPath)) await this.thumbnailInFlight.get(thumbPath);
         return {
           path: thumbPath,
           filename: thumbFilename,
@@ -117,12 +126,15 @@ export class ImageProcessor {
         };
       }
 
-      // Generate new thumbnail
-      await sharp(imagePath)
-        .rotate() // Auto-rotate based on EXIF orientation
+      if (this.thumbnailInFlight.has(thumbPath)) {
+        await this.thumbnailInFlight.get(thumbPath);
+        return { path: thumbPath, filename: thumbFilename, cached: true };
+      }
+      const generate = writeCachedImage(sharp(imagePath).rotate()
         .resize(this.thumbnailConfig.width, null, { withoutEnlargement: true })
-        .jpeg({ quality: this.thumbnailConfig.quality })
-        .toFile(thumbPath);
+        .jpeg({ quality: this.thumbnailConfig.quality }), thumbPath);
+      this.thumbnailInFlight.set(thumbPath, generate);
+      try { await generate; } finally { this.thumbnailInFlight.delete(thumbPath); }
 
       return {
         path: thumbPath,
@@ -140,7 +152,7 @@ export class ImageProcessor {
    * Generate a tiny blur placeholder (LQIP - Low Quality Image Placeholder)
    * Returns base64 encoded tiny image (20px width, heavily blurred)
    */
-  async getBlurPlaceholder(imagePath) {
+  async getBlurPlaceholder(imagePath, thumbnailPath = imagePath) {
     try {
       // Skip unsupported formats
       if (!this.isSupportedFormat(imagePath) || await this.isHeifFormat(imagePath)) {
@@ -158,7 +170,7 @@ export class ImageProcessor {
       }
 
       // Generate tiny blurred image (20px width)
-      const buffer = await sharp(imagePath)
+      const buffer = await sharp(thumbnailPath)
         .rotate()
         .resize(20, null, { withoutEnlargement: true })
         .blur(0.5) // Slight blur for smoother look
@@ -206,13 +218,15 @@ export class ImageProcessor {
 
       // Extract GPS location if available
       let location = 'Earth';
-      if (output.latitude && output.longitude) {
+      if (Number.isFinite(output.latitude) && Number.isFinite(output.longitude)) {
         location = `${output.latitude.toFixed(4)}, ${output.longitude.toFixed(4)}`;
       }
 
       return {
         date: dateStr,
         location,
+        latitude: Number.isFinite(output.latitude) && Math.abs(output.latitude) <= 90 ? output.latitude : null,
+        longitude: Number.isFinite(output.longitude) && Math.abs(output.longitude) <= 180 ? output.longitude : null,
         exif: {
           camera: output.Model || output.Make || 'Unknown Camera',
           lens: output.LensModel || 'Unknown Lens',
@@ -306,13 +320,14 @@ export class ImageProcessor {
     }
     
     // Get blur placeholder (LQIP)
-    const blurPlaceholder = await this.getBlurPlaceholder(imagePath);
+    const blurPlaceholder = await this.getBlurPlaceholder(imagePath, thumbnail.path);
     
     // Get EXIF data
     const metadata = await this.extractExif(imagePath);
     
     // Get dimensions
     const dimensions = await this.getImageDimensions(imagePath);
+    const fileStats = await fs.stat(imagePath);
 
     return {
       id: safeId,
@@ -327,7 +342,9 @@ export class ImageProcessor {
       blurPlaceholder, // Base64 encoded tiny blurred image
       ...metadata,
       dimensions,
-      lastModified: (await fs.stat(imagePath)).mtime.toISOString()
+      lastModified: fileStats.mtime.toISOString(),
+      fileSize: fileStats.size,
+      metadataVersion: 1
     };
   }
 
@@ -345,26 +362,18 @@ export class ImageProcessor {
   /**
    * Clean up old cached thumbnails
    */
-  async cleanupCache(validHashes = []) {
-    try {
-      const files = await fs.readdir(this.cacheDir);
-      let cleaned = 0;
-      
-      for (const file of files) {
-        const hash = file.replace('thumb_', '').replace(`.${this.thumbnailConfig.format}`, '');
-        if (!validHashes.includes(hash)) {
-          await fs.remove(path.join(this.cacheDir, file));
-          cleaned++;
-          this.cacheIndex.delete(hash);
-        }
-      }
-      
-      console.log(`🧹 Cleaned ${cleaned} old cached thumbnails`);
-      return cleaned;
-    } catch (error) {
-      console.error('Error cleaning cache:', error);
-      return 0;
+  async cleanupCache(validHashes) {
+    if (!Array.isArray(validHashes)) throw new Error('Catalog hashes are required for cache cleanup');
+    const keep = new Set(validHashes);
+    const files = await fs.readdir(this.cacheDir);
+    let cleaned = 0;
+    for (const file of files) {
+      const match = /^(?:thumb|blur)_([a-f0-9]{32})\.(?:jpeg|jpg|webp|png|base64)$/.exec(file);
+      if (!match || keep.has(match[1])) continue;
+      await fs.remove(path.join(this.cacheDir, file));
+      this.cacheIndex.delete(match[1]); cleaned++;
     }
+    return cleaned;
   }
 
   /**
@@ -395,14 +404,13 @@ export class ImageProcessor {
         }
       }
 
-      const generatePreview = sharp(imagePath)
+      const generatePreview = writeCachedImage(sharp(imagePath)
         .rotate()
         .resize(1920, null, {
           withoutEnlargement: true,
           fit: 'inside',
         })
-        .jpeg({ quality: 82, progressive: true, mozjpeg: true })
-        .toFile(previewPath);
+        .jpeg({ quality: 82, progressive: true, mozjpeg: true }), previewPath);
 
       this.previewInFlight.set(inFlightKey, generatePreview);
 
@@ -449,14 +457,13 @@ export class ImageProcessor {
         }
       }
 
-      const generateDisplay = sharp(imagePath)
+      const generateDisplay = writeCachedImage(sharp(imagePath)
         .rotate()
         .resize(3840, null, {
           withoutEnlargement: true,
           fit: 'inside',
         })
-        .jpeg({ quality: 85, progressive: true, mozjpeg: true })
-        .toFile(displayPath);
+        .jpeg({ quality: 85, progressive: true, mozjpeg: true }), displayPath);
 
       this.displayInFlight.set(inFlightKey, generateDisplay);
 
@@ -470,51 +477,6 @@ export class ImageProcessor {
     } catch (error) {
       console.error(`Error generating display image for ${imagePath}:`, error.message);
       return null;
-    }
-  }
-
-  /**
-   * Clean up old cache based on size limit (LRU-style)
-   */
-  async cleanupOldCache() {
-    try {
-      const files = await fs.readdir(this.cacheDir);
-      const maxCacheSize = this.thumbnailConfig.maxCacheSize || 1000;
-      
-      if (files.length <= maxCacheSize) {
-        console.log(`✅ Cache size OK: ${files.length}/${maxCacheSize}`);
-        return;
-      }
-
-      // Get file stats and sort by access time
-      const fileStats = await Promise.all(
-        files.map(async (file) => {
-          const filePath = path.join(this.cacheDir, file);
-          try {
-            const stats = await fs.stat(filePath);
-            return { file, atime: stats.atimeMs, filePath };
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      const validStats = fileStats.filter(Boolean);
-      validStats.sort((a, b) => a.atime - b.atime); // Oldest first
-
-      const toDelete = validStats.slice(0, validStats.length - maxCacheSize);
-      let cleaned = 0;
-
-      for (const { file, filePath } of toDelete) {
-        await fs.remove(filePath);
-        const hash = file.replace('thumb_', '').replace(`.${this.thumbnailConfig.format}`, '');
-        this.cacheIndex.delete(hash);
-        cleaned++;
-      }
-
-      console.log(`🧹 Auto-cleaned ${cleaned} old cached thumbnails (LRU)`);
-    } catch (error) {
-      console.error('Error in auto-cleanup:', error);
     }
   }
 
@@ -564,27 +526,12 @@ export class ImageProcessor {
   /**
    * Delete a specific thumbnail from cache
    */
-  async deleteThumbnail(photoId) {
-    try {
-      // Try to find thumbnail by scanning cache (simplified approach)
-      const files = await fs.readdir(this.cacheDir);
-      
-      for (const file of files) {
-        if (file.startsWith('thumb_')) {
-          // We can't directly map photoId to thumbnail without the hash
-          // So we'll clean up old thumbnails periodically instead
-          // For immediate deletion, we'd need to store the hash in the photo record
-        }
-      }
-      
-      // For now, just trigger cache cleanup which will remove orphaned thumbnails
-      await this.cleanupOldCache();
-      
-      return { success: true };
-    } catch (error) {
-      console.error(`Error deleting thumbnail for ${photoId}:`, error.message);
-      return { success: false, error: error.message };
-    }
+  async deleteThumbnail(photo) {
+    const match = /^thumb_([a-f0-9]{32})\.(?:jpeg|jpg|webp|png)$/.exec(photo.thumbnailFilename || '');
+    if (!match) throw new Error('Invalid catalog thumbnail filename');
+    await fs.remove(path.join(this.cacheDir, photo.thumbnailFilename));
+    await fs.remove(path.join(this.cacheDir, `blur_${match[1]}.base64`));
+    return { success: true };
   }
 
   /**
