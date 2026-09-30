@@ -63,11 +63,7 @@ const TEMPLATE_CLASSES: Record<string, string> = {
   'classic-white': 'bg-[#f7f4ef] text-neutral-950',
   'minimal-black': 'bg-neutral-950 text-neutral-50',
   magazine: 'bg-[#ece7dc] text-neutral-950',
-  mobile: 'bg-white text-neutral-950',
-  'top-logo': 'bg-[#f5f2ec] text-neutral-950',
   'right-rail': 'bg-[#f0eee8] text-neutral-950',
-  poster: 'bg-white text-neutral-950',
-  'warm-card': 'bg-[#eadfce] text-[#211a13]',
   'blurred-glass': 'bg-neutral-950 text-white'
 };
 

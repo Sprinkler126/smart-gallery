@@ -132,30 +132,6 @@ const TEMPLATES = [
     border: '#fbfaf6'
   },
   {
-    id: 'mobile',
-    layout: 'compact-footer',
-    name: '手机水印',
-    description: '紧凑信息栏，适合手机样张和社交平台。',
-    background: '#ffffff',
-    imageBackground: '#ffffff',
-    text: '#171717',
-    muted: '#707070',
-    accent: '#171717',
-    border: '#ffffff'
-  },
-  {
-    id: 'top-logo',
-    layout: 'top-header',
-    name: 'Top Brand',
-    description: 'Logo and title sit above the photo, EXIF details stay below.',
-    background: '#f5f2ec',
-    imageBackground: '#ffffff',
-    text: '#141414',
-    muted: '#6b6b6b',
-    accent: '#111111',
-    border: '#ffffff'
-  },
-  {
     id: 'right-rail',
     layout: 'right-rail',
     name: 'Right Rail',
@@ -166,30 +142,6 @@ const TEMPLATES = [
     muted: '#666666',
     accent: '#111111',
     border: '#ffffff'
-  },
-  {
-    id: 'poster',
-    layout: 'center-footer',
-    name: 'Poster',
-    description: 'Large photo with centered brand and a quiet caption area underneath.',
-    background: '#ffffff',
-    imageBackground: '#ffffff',
-    text: '#171717',
-    muted: '#777777',
-    accent: '#171717',
-    border: '#ffffff'
-  },
-  {
-    id: 'warm-card',
-    layout: 'left-footer',
-    name: 'Warm Card',
-    description: 'Warm editorial card with a larger footer and relaxed spacing.',
-    background: '#eadfce',
-    imageBackground: '#fffaf2',
-    text: '#211a13',
-    muted: '#766b5d',
-    accent: '#7a4f20',
-    border: '#fffaf2'
   },
   {
     id: 'blurred-glass',
@@ -427,34 +379,6 @@ export class ExifFrameService {
     `);
   }
 
-  buildHeaderSvg(fields, template, width, height) {
-    return Buffer.from(`
-      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-        <text x="0" y="${Math.round(height * 0.42)}" font-family="Arial, Helvetica, sans-serif" font-size="${Math.round(height * 0.28)}" font-weight="700" fill="${template.text}">${escapeXml(fields.title || 'Untitled')}</text>
-        <text x="0" y="${Math.round(height * 0.72)}" font-family="Arial, Helvetica, sans-serif" font-size="${Math.round(height * 0.16)}" fill="${template.muted}">${escapeXml(compactParts([fields.date, fields.location]).join(' / '))}</text>
-      </svg>
-    `);
-  }
-
-  buildCenterTextSvg(fields, template, width, height) {
-    const settings = compactParts([
-      fields.camera,
-      fields.lens,
-      fields.focalLength,
-      fields.aperture,
-      fields.shutter,
-      fields.iso ? `ISO ${fields.iso}` : ''
-    ]).join('  |  ');
-    return Buffer.from(`
-      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-        <text x="${Math.round(width / 2)}" y="44" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" fill="${template.text}">${escapeXml(fields.title || 'Untitled')}</text>
-        <text x="${Math.round(width / 2)}" y="92" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="${template.text}">${escapeXml(settings)}</text>
-        <text x="${Math.round(width / 2)}" y="136" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="${template.muted}">${escapeXml(compactParts([fields.date, fields.location]).join(' / '))}</text>
-        <text x="${Math.round(width / 2)}" y="178" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="${template.muted}">${escapeXml(fields.signature)}</text>
-      </svg>
-    `);
-  }
-
   buildRailTextSvg(fields, template, width, height) {
     const settings = compactParts([
       fields.focalLength,
@@ -626,18 +550,14 @@ export class ExifFrameService {
     if (REFERENCE_LAYOUTS.has(layout)) {
       return this.createReferenceFrame({ photo, fields, template, canvasWidth });
     }
-    const isMobileTemplate = template.id === 'mobile';
-    const outerPadding = Math.round(canvasWidth * (isMobileTemplate ? 0.045 : layout === 'split-footer' ? 0.025 : 0.06));
-    const headerHeight = layout === 'top-header' ? Math.round(canvasWidth * 0.16) : 0;
+    const outerPadding = Math.round(canvasWidth * (layout === 'split-footer' ? 0.025 : 0.06));
     const sideWidth = layout === 'right-rail' ? Math.round(canvasWidth * 0.28) : 0;
     const footerHeight = layout === 'right-rail'
       ? 0
       : Math.round(canvasWidth * (
-        layout === 'compact-footer' ? 0.16 :
-          layout === 'title-footer' ? 0.28 :
-            layout === 'center-footer' ? 0.3 :
-              layout === 'split-footer' ? 0.095 :
-                layout === 'blurred-frame' ? 0.085 : 0.24
+        layout === 'title-footer' ? 0.28 :
+          layout === 'split-footer' ? 0.095 :
+            layout === 'blurred-frame' ? 0.085 : 0.24
       ));
     const imageMaxWidth = layout === 'blurred-frame'
       ? Math.round(canvasWidth * 0.78)
@@ -655,11 +575,11 @@ export class ExifFrameService {
     const imageMeta = await sharp(imageBuffer).metadata();
     const imageWidth = imageMeta.width || imageMaxWidth;
     const imageHeight = imageMeta.height || Math.round(canvasWidth * 0.75);
-    const canvasHeight = imageHeight + outerPadding * (layout === 'blurred-frame' ? 1 : 2) + footerHeight + headerHeight;
+    const canvasHeight = imageHeight + outerPadding * (layout === 'blurred-frame' ? 1 : 2) + footerHeight;
     const imageLeft = layout === 'right-rail'
       ? outerPadding
       : Math.round((canvasWidth - imageWidth) / 2);
-    const imageTop = outerPadding + headerHeight;
+    const imageTop = outerPadding;
     const footerTop = imageTop + imageHeight + Math.round(outerPadding * (layout === 'blurred-frame' ? 0 : layout === 'split-footer' ? 0.1 : 0.58));
     const footerInnerWidth = canvasWidth - outerPadding * 2;
     const logoWidth = Math.round(footerInnerWidth * (layout === 'title-footer' ? 0.26 : 0.22));
@@ -704,23 +624,6 @@ export class ExifFrameService {
         left: 0,
         top: footerTop
       });
-    } else if (layout === 'top-header') {
-      const headerLogoWidth = Math.round(canvasWidth * 0.2);
-      const headerLogoHeight = Math.round(headerHeight * 0.58);
-      const headerLogoTop = outerPadding + Math.round(headerHeight * 0.18);
-      const headerTextLeft = outerPadding + headerLogoWidth + Math.round(canvasWidth * 0.04);
-      const headerLogo = await this.buildLogoComposite(fields, template, outerPadding, headerLogoTop, headerLogoWidth, headerLogoHeight, customLogoBuffer);
-      composites.push(headerLogo || this.buildBrandTextComposite(fields.brand, template, outerPadding, headerLogoTop, headerLogoWidth, headerLogoHeight));
-      composites.push({
-        input: this.buildHeaderSvg(fields, template, canvasWidth - headerTextLeft - outerPadding, headerHeight),
-        left: headerTextLeft,
-        top: outerPadding
-      });
-      composites.push({
-        input: this.buildTextSvg(fields, template, footerInnerWidth, Math.max(210, footerHeight), template.id),
-        left: outerPadding,
-        top: footerTop
-      });
     } else if (layout === 'right-rail') {
       const railLeft = imageLeft + imageWidth + outerPadding;
       const railWidth = Math.max(260, canvasWidth - railLeft - outerPadding);
@@ -731,17 +634,6 @@ export class ExifFrameService {
         input: this.buildRailTextSvg(fields, template, railWidth, Math.max(360, imageHeight - railLogoHeight - outerPadding)),
         left: railLeft,
         top: imageTop + railLogoHeight + outerPadding
-      });
-    } else if (layout === 'center-footer') {
-      const centerLogoWidth = Math.round(footerInnerWidth * 0.24);
-      const centerLogoHeight = Math.round(footerHeight * 0.36);
-      const centerLogoLeft = Math.round((canvasWidth - centerLogoWidth) / 2);
-      const centerLogo = await this.buildLogoComposite(fields, template, centerLogoLeft, footerTop, centerLogoWidth, centerLogoHeight, customLogoBuffer);
-      composites.push(centerLogo || this.buildBrandTextComposite(fields.brand, template, centerLogoLeft, footerTop, centerLogoWidth, centerLogoHeight));
-      composites.push({
-        input: this.buildCenterTextSvg(fields, template, footerInnerWidth, Math.max(190, footerHeight - centerLogoHeight), template.id),
-        left: outerPadding,
-        top: footerTop + centerLogoHeight + Math.round(outerPadding * 0.2)
       });
     } else {
       composites.push({
