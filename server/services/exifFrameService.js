@@ -36,6 +36,66 @@ const TEMPLATES = [
     border: '#ffffff'
   },
   {
+    id: 'bare-photo', layout: 'bare-photo', name: '纯照片',
+    description: '只保留照片，不添加边框或参数。',
+    background: '#ffffff', imageBackground: '#ffffff', text: '#171717', muted: '#666666', accent: '#171717', border: '#ffffff'
+  },
+  {
+    id: 'clean-border', layout: 'clean-border', name: '纯白相框',
+    description: '照片四周留白，不显示参数。',
+    background: '#ffffff', imageBackground: '#ffffff', text: '#171717', muted: '#666666', accent: '#171717', border: '#ffffff'
+  },
+  {
+    id: 'center-single', layout: 'center-single', name: '居中单行',
+    description: '相机、镜头与曝光参数在白色底栏中居中排成一行。',
+    background: '#ffffff', imageBackground: '#ffffff', text: '#171717', muted: '#666666', accent: '#171717', border: '#ffffff'
+  },
+  {
+    id: 'center-double', layout: 'center-double', name: '居中双行',
+    description: '底栏第一行是相机镜头，第二行是曝光参数。',
+    background: '#ffffff', imageBackground: '#ffffff', text: '#171717', muted: '#666666', accent: '#171717', border: '#ffffff'
+  },
+  {
+    id: 'single-date', layout: 'single-date', name: '单行＋时间',
+    description: '底栏左侧是一行参数，右侧是拍摄时间。',
+    background: '#ffffff', imageBackground: '#ffffff', text: '#171717', muted: '#666666', accent: '#171717', border: '#ffffff'
+  },
+  {
+    id: 'double-date', layout: 'double-date', name: '双行＋时间',
+    description: '底栏居中显示两行参数，拍摄时间在第三行。',
+    background: '#ffffff', imageBackground: '#ffffff', text: '#171717', muted: '#666666', accent: '#171717', border: '#ffffff'
+  },
+  {
+    id: 'film-data', layout: 'film-data', name: '胶片信息',
+    description: '琥珀色参数直接落在照片下方的左右两角。',
+    background: '#111111', imageBackground: '#111111', text: '#f5b94d', muted: '#f5b94d', accent: '#f5b94d', border: '#111111'
+  },
+  {
+    id: 'monitor-strip', layout: 'monitor-strip', name: '监视器',
+    description: '照片下沿的黑条将光圈、快门、ISO 和焦距分格显示。',
+    background: '#000000', imageBackground: '#000000', text: '#ffffff', muted: '#ffffff', accent: '#ffffff', border: '#000000'
+  },
+  {
+    id: 'lightroom-strip', layout: 'lightroom-strip', name: '暗色参数栏',
+    description: '黑色窄底栏分别放曝光参数、器材和日期。',
+    background: '#1e1e1e', imageBackground: '#1e1e1e', text: '#ffffff', muted: '#c5c5c5', accent: '#ffffff', border: '#1e1e1e'
+  },
+  {
+    id: 'photo-poster', layout: 'photo-poster', name: '照片海报',
+    description: '标题放在照片左上角，地点与日期放在左下角。',
+    background: '#111111', imageBackground: '#111111', text: '#ffffff', muted: '#eeeeee', accent: '#ffffff', border: '#111111'
+  },
+  {
+    id: 'notice-overlay', layout: 'notice-overlay', name: '照片告示',
+    description: '相机信息放在照片右上角，曝光参数放在底部中央。',
+    background: '#111111', imageBackground: '#111111', text: '#ffffff', muted: '#eeeeee', accent: '#ffffff', border: '#111111'
+  },
+  {
+    id: 'cinema-wide', layout: 'cinema-wide', name: '电影画幅',
+    description: '上下黑色遮幅，照片以宽银幕比例显示。',
+    background: '#000000', imageBackground: '#000000', text: '#ffffff', muted: '#ffffff', accent: '#ffffff', border: '#000000'
+  },
+  {
     id: 'classic-white',
     layout: 'left-footer',
     name: '经典白边',
@@ -165,6 +225,11 @@ const safeNumber = (value, fallback, min, max) => {
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(min, Math.min(max, numeric));
 };
+
+const REFERENCE_LAYOUTS = new Set([
+  'bare-photo', 'clean-border', 'center-single', 'center-double', 'single-date', 'double-date',
+  'film-data', 'monitor-strip', 'lightroom-strip', 'photo-poster', 'notice-overlay', 'cinema-wide'
+]);
 
 export class ExifFrameService {
   constructor({ galleryService, config = {}, baseDir = process.cwd() }) {
@@ -449,6 +514,104 @@ export class ExifFrameService {
     `);
   }
 
+  async createReferenceFrame({ photo, fields, template, canvasWidth }) {
+    const layout = template.layout;
+    const centeredFooter = ['center-single', 'center-double', 'single-date', 'double-date'].includes(layout);
+    const padding = Math.round(canvasWidth * (
+      layout === 'clean-border' || centeredFooter ? 0.022 : layout === 'lightroom-strip' ? 0.008 : 0
+    ));
+    const headerHeight = layout === 'cinema-wide' ? Math.round(canvasWidth * 0.065) : 0;
+    const footerHeight = Math.round(canvasWidth * ({
+      'center-single': 0.065, 'center-double': 0.088,
+      'single-date': 0.065, 'double-date': 0.115,
+      'monitor-strip': 0.03, 'lightroom-strip': 0.04,
+      'cinema-wide': 0.065
+    }[layout] || 0));
+    const targetWidth = canvasWidth - padding * 2;
+    const photoPipeline = sharp(photo.originalPath).rotate();
+    const imageBuffer = layout === 'cinema-wide'
+      ? await photoPipeline.resize(canvasWidth, Math.round(canvasWidth * 0.54), { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer()
+      : layout === 'bare-photo'
+        ? await photoPipeline.resize({ width: canvasWidth }).jpeg({ quality: 92 }).toBuffer()
+        : await photoPipeline.resize({ width: targetWidth, height: Math.round(canvasWidth * 1.1), fit: 'inside' }).jpeg({ quality: 92 }).toBuffer();
+    const imageMeta = await sharp(imageBuffer).metadata();
+    const imageWidth = imageMeta.width;
+    const imageHeight = imageMeta.height;
+    const canvasHeight = imageHeight + padding * 2 + headerHeight + footerHeight;
+    const imageLeft = Math.round((canvasWidth - imageWidth) / 2);
+    const imageTop = padding + headerHeight;
+    const exposure = compactParts([fields.iso ? `ISO ${fields.iso}` : '', fields.focalLength, fields.aperture, fields.shutter]).join('   ');
+    const camera = compactParts([fields.camera, fields.lens]).join('  |  ');
+    const date = fields.date || '';
+    const composites = [{ input: imageBuffer, left: imageLeft, top: imageTop }];
+    const overlay = (content, width = canvasWidth, height = footerHeight, left = 0, top = imageTop + imageHeight) => {
+      composites.push({
+        input: Buffer.from(`<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${content}</svg>`),
+        left, top
+      });
+    };
+
+    if (centeredFooter) {
+      const middle = Math.round(canvasWidth / 2);
+      const first = layout === 'center-single' ? compactParts([camera, exposure]).join('  ·  ') : camera;
+      const firstSize = Math.max(20, 29 - Math.max(0, first.length - 55) * 0.15);
+      if (layout === 'single-date') {
+        overlay(`
+          <text x="${padding + 20}" y="${Math.round(footerHeight * 0.57)}" font-family="Arial, sans-serif" font-size="25" fill="#222">${escapeXml(exposure)}</text>
+          <text x="${canvasWidth - padding - 20}" y="${Math.round(footerHeight * 0.57)}" text-anchor="end" font-family="Arial, sans-serif" font-size="24" fill="#777">${escapeXml(date)}</text>
+        `);
+      } else {
+        const firstY = Math.round(footerHeight * (layout === 'center-single' ? 0.56 : layout === 'double-date' ? 0.32 : 0.39));
+        overlay(`
+          <text x="${middle}" y="${firstY}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${firstSize}" font-weight="600" fill="#222">${escapeXml(first)}</text>
+          ${layout !== 'center-single' ? `<text x="${middle}" y="${Math.round(footerHeight * (layout === 'double-date' ? 0.6 : 0.75))}" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" fill="#666">${escapeXml(exposure)}</text>` : ''}
+          ${layout === 'double-date' ? `<text x="${middle}" y="${Math.round(footerHeight * 0.84)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#888">${escapeXml(date)}</text>` : ''}
+        `);
+      }
+    } else if (layout === 'film-data') {
+      const left = compactParts([fields.camera, fields.lens, date]);
+      const right = compactParts([fields.aperture, fields.shutter, fields.iso ? `ISO ${fields.iso}` : '', fields.focalLength]);
+      overlay(`
+        <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".62"/></linearGradient></defs>
+        <rect y="${Math.round(imageHeight * 0.68)}" width="${imageWidth}" height="${Math.round(imageHeight * 0.32)}" fill="url(#shade)"/>
+        ${left.map((line, index) => `<text x="32" y="${imageHeight - 90 + index * 27}" font-family="Arial, sans-serif" font-size="21" fill="#f6bb58">${escapeXml(line)}</text>`).join('')}
+        ${right.map((line, index) => `<text x="${imageWidth - 32}" y="${imageHeight - 116 + index * 27}" text-anchor="end" font-family="Arial, sans-serif" font-size="21" fill="#f6bb58">${escapeXml(line)}</text>`).join('')}
+      `, imageWidth, imageHeight, imageLeft, imageTop);
+    } else if (layout === 'monitor-strip') {
+      const values = [fields.aperture, fields.shutter, fields.iso ? `ISO ${fields.iso}` : '', fields.focalLength];
+      overlay(`<rect width="${canvasWidth}" height="${footerHeight}" fill="#050505"/>${values.map((value, index) => `<text x="${Math.round(canvasWidth * (index + 0.5) / 4)}" y="${Math.round(footerHeight * 0.67)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#fff">${escapeXml(value)}</text>`).join('')}`);
+    } else if (layout === 'lightroom-strip') {
+      overlay(`
+        <rect width="${canvasWidth}" height="${footerHeight}" fill="#1c1c1c"/>
+        <text x="32" y="${Math.round(footerHeight * 0.64)}" font-family="Arial, sans-serif" font-size="23" fill="#eee">${escapeXml(exposure)}</text>
+        <text x="${Math.round(canvasWidth / 2)}" y="${Math.round(footerHeight * 0.64)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="23" fill="#eee">${escapeXml(camera)}</text>
+        <text x="${canvasWidth - 32}" y="${Math.round(footerHeight * 0.64)}" text-anchor="end" font-family="Arial, sans-serif" font-size="22" fill="#bbb">${escapeXml(date)}</text>
+      `);
+    } else if (layout === 'photo-poster' || layout === 'notice-overlay') {
+      const shade = `<defs><linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".56"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient><linearGradient id="bottom" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient></defs><rect width="${imageWidth}" height="${Math.round(imageHeight * 0.32)}" fill="url(#top)"/><rect y="${Math.round(imageHeight * 0.66)}" width="${imageWidth}" height="${Math.round(imageHeight * 0.34)}" fill="url(#bottom)"/>`;
+      const body = layout === 'photo-poster'
+        ? `<text x="48" y="100" font-family="Arial, sans-serif" font-size="72" font-weight="700" fill="#fff">${escapeXml(fields.title)}</text><text x="48" y="${imageHeight - 76}" font-family="Arial, sans-serif" font-size="35" fill="#fff">${escapeXml(fields.location || fields.signature)}</text><text x="48" y="${imageHeight - 36}" font-family="Arial, sans-serif" font-size="24" fill="#eee">${escapeXml(date)}</text>`
+        : `<text x="${imageWidth - 48}" y="70" text-anchor="end" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#fff">${escapeXml(fields.camera)}</text><text x="${imageWidth - 48}" y="112" text-anchor="end" font-family="Arial, sans-serif" font-size="27" fill="#eee">${escapeXml(fields.lens)}</text><text x="${Math.round(imageWidth / 2)}" y="${imageHeight - 42}" text-anchor="middle" font-family="Arial, sans-serif" font-size="27" fill="#fff">${escapeXml(exposure)}</text>`;
+      overlay(shade + body, imageWidth, imageHeight, imageLeft, imageTop);
+    }
+
+    const hash = crypto.createHash('md5')
+      .update(JSON.stringify({ photoId: photo.id, layout, fields, canvasWidth }))
+      .update(String(Date.now()))
+      .digest('hex').slice(0, 12);
+    const filename = `exif_frame_${hash}.jpg`;
+    const outputPath = path.join(this.outputDir, filename);
+    await sharp({ create: { width: canvasWidth, height: canvasHeight, channels: 4, background: template.background } })
+      .composite(composites)
+      .jpeg({ quality: 92, mozjpeg: true })
+      .toFile(outputPath);
+    return {
+      filename, url: `/photowall/api/exif-frame/file/${filename}`, path: outputPath,
+      template: { id: template.id, name: template.name }, fields,
+      size: { width: canvasWidth, height: canvasHeight }, logoUsed: false
+    };
+  }
+
   async createFrame({ photoId, templateId = 'exif-split', overrides = {}, width = 1800, customLogoBuffer = null } = {}) {
     const photo = this.galleryService.getPhoto(photoId);
     if (!photo) throw new Error('Photo not found');
@@ -460,6 +623,9 @@ export class ExifFrameService {
     const fields = this.buildFields(photo, overrides);
     const canvasWidth = safeNumber(width, 1800, 900, 2800);
     const layout = template.layout || 'left-footer';
+    if (REFERENCE_LAYOUTS.has(layout)) {
+      return this.createReferenceFrame({ photo, fields, template, canvasWidth });
+    }
     const isMobileTemplate = template.id === 'mobile';
     const outerPadding = Math.round(canvasWidth * (isMobileTemplate ? 0.045 : layout === 'split-footer' ? 0.025 : 0.06));
     const headerHeight = layout === 'top-header' ? Math.round(canvasWidth * 0.16) : 0;

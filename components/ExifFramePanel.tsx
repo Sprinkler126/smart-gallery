@@ -71,6 +71,11 @@ const TEMPLATE_CLASSES: Record<string, string> = {
   'blurred-glass': 'bg-neutral-950 text-white'
 };
 
+const REFERENCE_LAYOUTS = new Set([
+  'bare-photo', 'clean-border', 'center-single', 'center-double', 'single-date', 'double-date',
+  'film-data', 'monitor-strip', 'lightroom-strip', 'photo-poster', 'notice-overlay', 'cinema-wide'
+]);
+
 const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [templateId, setTemplateId] = useState('exif-split');
@@ -208,6 +213,42 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
   const previewLogo = previewLogoUrl
     ? <img src={previewLogoUrl} alt={`${fields.brand || 'Camera'} logo`} draggable={false} className="h-full w-full object-contain" />
     : <span className="font-black uppercase leading-none break-words">{fields.brand || 'CAMERA'}</span>;
+  const layout = selectedTemplate?.layout || '';
+  const templateGroups = [
+    { name: '样张排版', items: templates.filter(item => REFERENCE_LAYOUTS.has(item.layout || '') || ['exif-split', 'blurred-glass'].includes(item.id)) },
+    { name: '其他风格', items: templates.filter(item => !REFERENCE_LAYOUTS.has(item.layout || '') && !['exif-split', 'blurred-glass'].includes(item.id)) }
+  ];
+  const referencePhoto = <img src={photo.url} alt={photo.title} className="block w-full max-h-[58vh] object-contain select-none" draggable={false} />;
+  const referencePreview = (() => {
+    if (layout === 'bare-photo') return <div className="mx-auto max-w-4xl shadow-2xl">{referencePhoto}</div>;
+    if (layout === 'clean-border') return <div className="mx-auto max-w-4xl bg-white p-[2.2%] shadow-2xl">{referencePhoto}</div>;
+    if (['center-single', 'center-double', 'single-date', 'double-date'].includes(layout)) {
+      return <div className="mx-auto max-w-4xl bg-white p-[2.2%] text-neutral-950 shadow-2xl">
+        {referencePhoto}
+        {layout === 'center-single' && <p className="py-3 text-center text-xs sm:text-sm truncate">{cameraLine} · {exposureLine}</p>}
+        {layout === 'center-double' && <div className="py-3 text-center text-xs sm:text-sm leading-snug"><p className="truncate font-semibold">{cameraLine}</p><p className="truncate text-neutral-500">{exposureLine}</p></div>}
+        {layout === 'single-date' && <div className="flex justify-between gap-3 py-3 text-[10px] sm:text-xs"><p className="min-w-0 truncate">{exposureLine}</p><p className="shrink-0 text-neutral-500">{fields.date}</p></div>}
+        {layout === 'double-date' && <div className="py-3 text-center text-[10px] sm:text-xs leading-snug"><p className="truncate font-semibold">{cameraLine}</p><p className="truncate text-neutral-500">{exposureLine}</p><p className="truncate text-neutral-400">{fields.date}</p></div>}
+      </div>;
+    }
+    if (layout === 'film-data') return <div className="relative mx-auto max-w-4xl shadow-2xl">
+      {referencePhoto}
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/60 to-transparent p-3 text-[9px] sm:text-xs text-amber-300 leading-tight">
+        <div className="min-w-0"><p className="truncate">{fields.camera}</p><p className="truncate">{fields.lens}</p><p>{fields.date}</p></div>
+        <div className="text-right shrink-0"><p>{fields.aperture}</p><p>{fields.shutter}</p><p>{fields.iso ? `ISO ${fields.iso}` : ''}</p><p>{fields.focalLength}</p></div>
+      </div>
+    </div>;
+    if (layout === 'monitor-strip') return <div className="mx-auto max-w-4xl bg-black shadow-2xl">{referencePhoto}<div className="grid grid-cols-4 gap-1 py-1 text-center text-[9px] sm:text-xs text-white"><span>{fields.aperture}</span><span>{fields.shutter}</span><span>{fields.iso ? `ISO ${fields.iso}` : ''}</span><span>{fields.focalLength}</span></div></div>;
+    if (layout === 'lightroom-strip') return <div className="mx-auto max-w-4xl bg-[#1e1e1e] p-[0.8%] text-white shadow-2xl">{referencePhoto}<div className="grid grid-cols-3 items-center gap-2 py-2 text-[9px] sm:text-xs"><span className="truncate">{exposureLine}</span><span className="truncate text-center">{cameraLine}</span><span className="truncate text-right text-neutral-400">{fields.date}</span></div></div>;
+    if (layout === 'photo-poster' || layout === 'notice-overlay') return <div className="relative mx-auto max-w-4xl text-white shadow-2xl">
+      {referencePhoto}
+      <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
+      <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+      {layout === 'photo-poster' ? <><div className="absolute top-[4%] left-[4%] max-w-[80%] text-xl sm:text-4xl font-bold truncate">{fields.title || photo.title}</div><div className="absolute bottom-[4%] left-[4%] text-xs sm:text-base"><p>{fields.location || fields.signature}</p><p className="text-[10px] sm:text-xs text-white/80">{fields.date}</p></div></> : <><div className="absolute top-[4%] right-[4%] max-w-[70%] text-right text-xs sm:text-lg"><p className="font-bold truncate">{fields.camera}</p><p className="truncate">{fields.lens}</p></div><p className="absolute bottom-[4%] inset-x-[4%] text-center text-[10px] sm:text-sm truncate">{exposureLine}</p></>}
+    </div>;
+    if (layout === 'cinema-wide') return <div className="mx-auto max-w-4xl bg-black py-[6.5%] shadow-2xl"><img src={photo.url} alt={photo.title} className="block w-full aspect-[1.85] object-cover select-none" draggable={false} /></div>;
+    return null;
+  })();
 
   return (
     <div className="fixed inset-0 z-[70] bg-obsidian/95 backdrop-blur-md text-white flex flex-col">
@@ -235,7 +276,7 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(420px,1fr)_420px] gap-5 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
             <section className="space-y-4">
               <div className="rounded-lg bg-charcoal/70 border border-white/10 p-3 md:p-5">
-                {templateId === 'exif-split' ? (
+                {REFERENCE_LAYOUTS.has(layout) ? referencePreview : templateId === 'exif-split' ? (
                   <div className="mx-auto w-full max-w-4xl bg-[#f0eff4] p-[2.5%] text-neutral-950 shadow-2xl">
                     <div className="bg-white">
                       <img src={photo.url} alt={photo.title} className="block w-full max-h-[58vh] object-contain select-none" draggable={false} />
@@ -308,22 +349,21 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                   <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-300">模板</h3>
                   <ImageIcon size={17} className="text-gold" />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {templates.map(template => (
-                    <button
+                {templateGroups.map(group => group.items.length > 0 && <div key={group.name} className="space-y-2">
+                  <p className="text-xs text-gray-500">{group.name}</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {group.items.map(template => <button
                       key={template.id}
-                      onClick={() => setTemplateId(template.id)}
+                      onClick={() => { setTemplateId(template.id); setResultUrl(''); }}
                       title={template.description}
                       className={`min-h-10 rounded-md border px-2 py-2 text-center transition-colors ${
                         templateId === template.id
                           ? 'border-gold bg-gold/10 text-white'
                           : 'border-white/10 bg-white/[0.03] text-gray-300 hover:border-white/25'
                       }`}
-                    >
-                      <span className="block text-xs font-medium leading-tight">{template.name}</span>
-                    </button>
-                  ))}
-                </div>
+                    ><span className="block text-xs font-medium leading-tight">{template.name}</span></button>)}
+                  </div>
+                </div>)}
                 {selectedTemplate && (
                   <p className="text-xs text-gray-500 leading-relaxed">{selectedTemplate.description}</p>
                 )}
@@ -333,7 +373,9 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                 <div>
                   <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-300">品牌与 Logo</h3>
                   <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                    {customLogoDataUrl
+                    {REFERENCE_LAYOUTS.has(layout) || isBlurredGlass
+                      ? '当前排版以照片和参数为主，不显示品牌 Logo；Logo 会在支持它的模板中使用。'
+                      : customLogoDataUrl
                       ? `本次将使用你上传的 ${customLogoName}；文件不会保存到服务器。`
                       : logo.available
                       ? `已匹配 ${logo.filename}，预览与合成会使用透明 PNG。`
