@@ -504,7 +504,7 @@ const Lightbox: React.FC<LightboxProps> = ({ photo, onClose, onNext, onPrev, has
         
         {/* Swipe Hint - 移动端显示 */}
         {imageLoaded && !imageError && zoom === 1 && (
-          <div className="md:hidden absolute top-4 left-1/2 transform -translate-x-1/2 z-50 w-[calc(100%-7rem)] max-w-xs px-3 py-2 bg-black/40 backdrop-blur-md rounded-full text-white/60 text-xs text-center pointer-events-none">
+          <div className="md:hidden absolute top-20 left-1/2 transform -translate-x-1/2 z-50 w-[calc(100%-7rem)] max-w-xs px-3 py-2 bg-black/40 backdrop-blur-md rounded-full text-white/60 text-xs text-center pointer-events-none">
             左右滑动切换 · 双指缩放
           </div>
         )}
