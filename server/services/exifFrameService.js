@@ -9,7 +9,7 @@ const BRAND_ALIASES = [
   { brand: 'Sony', slug: 'sony', patterns: [/sony/i, /\bilce\b/i, /\bdsc-rx/i] },
   { brand: 'Fujifilm', slug: 'fujifilm', patterns: [/fujifilm/i, /\bfuji\b/i] },
   { brand: 'Leica', slug: 'leica', patterns: [/leica/i] },
-  { brand: 'Panasonic', slug: 'panasonic', patterns: [/panasonic/i, /lumix/i] },
+  { brand: 'Panasonic', slug: 'lumix', patterns: [/panasonic/i, /lumix/i] },
   { brand: 'Olympus', slug: 'olympus', patterns: [/olympus/i, /om system/i] },
   { brand: 'DJI', slug: 'dji', patterns: [/\bdji\b/i] },
   { brand: 'Apple', slug: 'apple', patterns: [/apple/i, /iphone/i] },
@@ -23,6 +23,18 @@ const BRAND_ALIASES = [
 ];
 
 const TEMPLATES = [
+  {
+    id: 'exif-split',
+    layout: 'split-footer',
+    name: '参数两侧',
+    description: '左下角放曝光参数和日期，右下角放 Logo、相机和镜头。',
+    background: '#f0eff4',
+    imageBackground: '#ffffff',
+    text: '#171717',
+    muted: '#626262',
+    accent: '#171717',
+    border: '#ffffff'
+  },
   {
     id: 'classic-white',
     layout: 'left-footer',
@@ -122,8 +134,8 @@ const TEMPLATES = [
   {
     id: 'blurred-glass',
     layout: 'blurred-frame',
-    name: 'Blurred Glass',
-    description: 'Frosted glass frame using a blurred copy of the photo as the background.',
+    name: '模糊背景',
+    description: '照片居中悬浮，底部居中放相机镜头和曝光参数。',
     background: '#141414',
     imageBackground: '#ffffff',
     text: '#ffffff',
@@ -187,12 +199,31 @@ export class ExifFrameService {
     const safeSlug = String(slug || '').toLowerCase().replace(/[^a-z0-9-]+/g, '');
     if (!safeSlug) return null;
 
-    for (const ext of ['svg', 'png', 'jpg', 'jpeg', 'webp']) {
+    for (const ext of ['png', 'svg', 'jpg', 'jpeg', 'webp']) {
       const logoPath = path.join(this.logoDir, `${safeSlug}.${ext}`);
       if (fs.existsSync(logoPath)) return logoPath;
     }
 
     return null;
+  }
+
+  async getLogoPngBuffer(slug) {
+    const logoPath = this.getLogoPath(slug);
+    if (!logoPath) return null;
+
+    try {
+      let input = logoPath;
+      if (path.extname(logoPath).toLowerCase() === '.svg') {
+        let svg = await fs.readFile(logoPath, 'utf8');
+        // Remove the common full-canvas white backdrop used by downloaded logo SVGs.
+        svg = svg.replace(/<path\b(?=[^>]*\bfill=["']#fff(?:fff)?["'])(?=[^>]*\bd=["']M0 0h[\d.]+v[\d.]+H0V0z["'])[^>]*\/>/gi, '');
+        input = Buffer.from(svg);
+      }
+
+      return await sharp(input).trim({ threshold: 2 }).png().toBuffer();
+    } catch {
+      return null;
+    }
   }
 
   buildFields(photo, overrides = {}) {
@@ -234,7 +265,8 @@ export class ExifFrameService {
       fields,
       logo: logoPath ? {
         available: true,
-        filename: path.basename(logoPath)
+        filename: path.basename(logoPath),
+        url: `/photowall/api/exif-frame/logo/${encodeURIComponent(fields.brandSlug)}`
       } : {
         available: false,
         expectedNames: [
@@ -249,15 +281,22 @@ export class ExifFrameService {
   }
 
   async buildLogoComposite(fields, template, left, top, width, height, customLogoBuffer = null) {
-    const logoPath = customLogoBuffer ? null : this.getLogoPath(fields.brandSlug);
-    if (!customLogoBuffer && !logoPath) return null;
+    const logoBuffer = customLogoBuffer
+      ? await sharp(customLogoBuffer).trim({ threshold: 2 }).png().toBuffer()
+      : await this.getLogoPngBuffer(fields.brandSlug);
+    if (!logoBuffer) return null;
 
     try {
-      const buffer = await sharp(customLogoBuffer || logoPath)
+      const buffer = await sharp(logoBuffer)
         .resize(width, height, { fit: 'inside', withoutEnlargement: true })
         .png()
         .toBuffer();
-      return { input: buffer, left, top };
+      const metadata = await sharp(buffer).metadata();
+      return {
+        input: buffer,
+        left: left + Math.round((width - metadata.width) / 2),
+        top: top + Math.round((height - metadata.height) / 2)
+      };
     } catch {
       return this.buildBrandTextComposite(fields.brand, template, left, top, width, height);
     }
@@ -369,23 +408,48 @@ export class ExifFrameService {
     `);
   }
 
-  buildGlassOverlaySvg(width, height, panelX, panelY, panelWidth, panelHeight) {
+  buildSplitFooterSvg(fields, template, width, height) {
+    const exposure = compactParts([
+      fields.iso ? `ISO ${fields.iso}` : '',
+      fields.focalLength,
+      fields.aperture,
+      fields.shutter
+    ]).join('   ');
+    const camera = fields.camera || 'Unknown Camera';
+    const lens = fields.lens || '';
+    const rightEdge = width - Math.round(width * 0.02);
+    const cameraSize = camera.length > 28 ? 20 : camera.length > 20 ? 24 : 29;
+    const lensSize = lens.length > 40 ? 17 : lens.length > 28 ? 21 : 25;
+    const firstLineY = Math.round(height * 0.43);
+    const secondLineY = Math.round(height * 0.7);
     return Buffer.from(`
       <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="v" cx="50%" cy="42%" r="72%">
-            <stop offset="0%" stop-color="rgba(0,0,0,0)"/>
-            <stop offset="100%" stop-color="rgba(0,0,0,0.42)"/>
-          </radialGradient>
-        </defs>
-        <rect width="${width}" height="${height}" fill="rgba(255,255,255,0.08)"/>
-        <rect width="${width}" height="${height}" fill="url(#v)"/>
-        <rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" fill="rgba(20,20,20,0.34)" stroke="rgba(255,255,255,0.36)" stroke-width="2"/>
+        <text x="${Math.round(width * 0.02)}" y="${firstLineY}" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="600" fill="${template.text}">${escapeXml(exposure)}</text>
+        <text x="${Math.round(width * 0.02)}" y="${secondLineY}" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="${template.muted}">${escapeXml(fields.date)}</text>
+        <line x1="${Math.round(width * 0.79)}" x2="${Math.round(width * 0.79)}" y1="${Math.round(height * 0.18)}" y2="${Math.round(height * 0.78)}" stroke="${template.muted}" stroke-width="2"/>
+        <text x="${rightEdge}" y="${firstLineY}" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="${cameraSize}" font-weight="700" fill="${template.text}">${escapeXml(camera)}</text>
+        <text x="${rightEdge}" y="${secondLineY}" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="${lensSize}" fill="${template.muted}">${escapeXml(lens)}</text>
       </svg>
     `);
   }
 
-  async createFrame({ photoId, templateId = 'classic-white', overrides = {}, width = 1800, customLogoBuffer = null } = {}) {
+  buildBlurredFooterSvg(fields, width, height) {
+    const cameraLine = compactParts([fields.camera, fields.lens]).join('  |  ');
+    const exposure = compactParts([
+      fields.iso ? `ISO ${fields.iso}` : '',
+      fields.focalLength,
+      fields.aperture,
+      fields.shutter
+    ]).join('  |  ');
+    return Buffer.from(`
+      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+        <text x="${Math.round(width / 2)}" y="${Math.round(height * 0.3)}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="27" fill="#ffffff">${escapeXml(cameraLine)}</text>
+        <text x="${Math.round(width / 2)}" y="${Math.round(height * 0.56)}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" fill="#ffffff">${escapeXml(exposure)}</text>
+      </svg>
+    `);
+  }
+
+  async createFrame({ photoId, templateId = 'exif-split', overrides = {}, width = 1800, customLogoBuffer = null } = {}) {
     const photo = this.galleryService.getPhoto(photoId);
     if (!photo) throw new Error('Photo not found');
     if (!photo.originalPath || !await fs.pathExists(photo.originalPath)) {
@@ -397,7 +461,7 @@ export class ExifFrameService {
     const canvasWidth = safeNumber(width, 1800, 900, 2800);
     const layout = template.layout || 'left-footer';
     const isMobileTemplate = template.id === 'mobile';
-    const outerPadding = Math.round(canvasWidth * (isMobileTemplate ? 0.045 : 0.06));
+    const outerPadding = Math.round(canvasWidth * (isMobileTemplate ? 0.045 : layout === 'split-footer' ? 0.025 : 0.06));
     const headerHeight = layout === 'top-header' ? Math.round(canvasWidth * 0.16) : 0;
     const sideWidth = layout === 'right-rail' ? Math.round(canvasWidth * 0.28) : 0;
     const footerHeight = layout === 'right-rail'
@@ -406,29 +470,31 @@ export class ExifFrameService {
         layout === 'compact-footer' ? 0.16 :
           layout === 'title-footer' ? 0.28 :
             layout === 'center-footer' ? 0.3 :
-              layout === 'blurred-frame' ? 0.24 : 0.24
+              layout === 'split-footer' ? 0.095 :
+                layout === 'blurred-frame' ? 0.085 : 0.24
       ));
-    const imageMaxWidth = canvasWidth - outerPadding * 2 - sideWidth - (sideWidth > 0 ? outerPadding : 0);
+    const imageMaxWidth = layout === 'blurred-frame'
+      ? Math.round(canvasWidth * 0.78)
+      : canvasWidth - outerPadding * 2 - sideWidth - (sideWidth > 0 ? outerPadding : 0);
 
     const imageBuffer = await sharp(photo.originalPath)
       .rotate()
       .resize({
         width: imageMaxWidth,
         height: Math.round(canvasWidth * 1.1),
-        fit: 'inside',
-        withoutEnlargement: true
+        fit: 'inside'
       })
       .jpeg({ quality: 92 })
       .toBuffer();
     const imageMeta = await sharp(imageBuffer).metadata();
     const imageWidth = imageMeta.width || imageMaxWidth;
     const imageHeight = imageMeta.height || Math.round(canvasWidth * 0.75);
-    const canvasHeight = imageHeight + outerPadding * 2 + footerHeight + headerHeight;
+    const canvasHeight = imageHeight + outerPadding * (layout === 'blurred-frame' ? 1 : 2) + footerHeight + headerHeight;
     const imageLeft = layout === 'right-rail'
       ? outerPadding
       : Math.round((canvasWidth - imageWidth) / 2);
     const imageTop = outerPadding + headerHeight;
-    const footerTop = imageTop + imageHeight + Math.round(outerPadding * 0.58);
+    const footerTop = imageTop + imageHeight + Math.round(outerPadding * (layout === 'blurred-frame' ? 0 : layout === 'split-footer' ? 0.1 : 0.58));
     const footerInnerWidth = canvasWidth - outerPadding * 2;
     const logoWidth = Math.round(footerInnerWidth * (layout === 'title-footer' ? 0.26 : 0.22));
     const logoHeight = Math.max(64, Math.round((footerHeight || canvasWidth * 0.2) * 0.55));
@@ -437,7 +503,7 @@ export class ExifFrameService {
     const textHeight = Math.max(250, footerHeight - Math.round(outerPadding * 0.2));
 
     const composites = [
-      {
+      ...(layout === 'blurred-frame' ? [] : [{
         input: await sharp({
           create: {
             width: imageWidth + 10,
@@ -448,44 +514,30 @@ export class ExifFrameService {
         }).png().toBuffer(),
         left: imageLeft - 5,
         top: imageTop - 5
-      },
+      }]),
       { input: imageBuffer, left: imageLeft, top: imageTop },
     ];
 
-    if (layout === 'blurred-frame') {
-      const glassPanelX = imageLeft - 5;
-      const glassPanelY = imageTop + imageHeight + Math.round(outerPadding * 0.45);
-      const glassPanelWidth = imageWidth + 10;
-      const glassBottomMargin = Math.round(outerPadding * 0.5);
-      const glassPanelHeight = Math.max(200, canvasHeight - glassPanelY - glassBottomMargin);
-      const glassPad = Math.round(canvasWidth * 0.028);
-      const glassGap = Math.round(canvasWidth * 0.035);
-      const glassLogoWidth = Math.round(glassPanelWidth * 0.22);
-      const glassLogoHeight = Math.max(56, glassPanelHeight - glassPad * 2);
-      const glassTextLeft = glassPanelX + glassPad + glassLogoWidth + glassGap;
-      const glassTextWidth = Math.max(260, glassPanelX + glassPanelWidth - glassTextLeft - glassPad);
-      const glassTextTop = glassPanelY + glassPad;
-      const glassTextHeight = Math.max(190, glassPanelHeight - glassPad * 2);
+    if (layout === 'split-footer') {
+      const plateHeight = imageHeight + footerHeight;
       composites.unshift({
-        input: this.buildGlassOverlaySvg(canvasWidth, canvasHeight, glassPanelX, glassPanelY, glassPanelWidth, glassPanelHeight),
-        left: 0,
-        top: 0
+        input: await sharp({ create: { width: imageWidth, height: plateHeight, channels: 4, background: '#ffffff' } }).png().toBuffer(),
+        left: imageLeft,
+        top: imageTop
       });
+      composites.push({ input: this.buildSplitFooterSvg(fields, template, imageWidth, footerHeight), left: imageLeft, top: footerTop });
+      const splitLogoWidth = Math.round(imageWidth * 0.145);
+      const splitLogoHeight = Math.round(footerHeight * 0.62);
+      const splitLogoLeft = imageLeft + Math.round(imageWidth * 0.625);
+      const splitLogoTop = footerTop + Math.round(footerHeight * 0.12);
+      const splitLogo = await this.buildLogoComposite(fields, template, splitLogoLeft, splitLogoTop, splitLogoWidth, splitLogoHeight, customLogoBuffer);
+      composites.push(splitLogo || this.buildBrandTextComposite(fields.brand, template, splitLogoLeft, splitLogoTop, splitLogoWidth, splitLogoHeight));
+    } else if (layout === 'blurred-frame') {
       composites.push({
-        input: this.buildTextSvg(fields, template, glassTextWidth, glassTextHeight, template.id),
-        left: glassTextLeft,
-        top: glassTextTop
+        input: this.buildBlurredFooterSvg(fields, canvasWidth, footerHeight),
+        left: 0,
+        top: footerTop
       });
-      const logoComposite = await this.buildLogoComposite(
-        fields,
-        template,
-        glassPanelX + glassPad,
-        glassTextTop + Math.round(glassTextHeight * 0.08),
-        glassLogoWidth,
-        glassLogoHeight,
-        customLogoBuffer
-      );
-      composites.push(logoComposite || this.buildBrandTextComposite(fields.brand, template, glassPanelX + glassPad, glassTextTop, glassLogoWidth, glassLogoHeight));
     } else if (layout === 'top-header') {
       const headerLogoWidth = Math.round(canvasWidth * 0.2);
       const headerLogoHeight = Math.round(headerHeight * 0.58);

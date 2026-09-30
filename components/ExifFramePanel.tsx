@@ -32,6 +32,7 @@ interface ExifFields {
 interface LogoInfo {
   available: boolean;
   filename?: string;
+  url?: string;
   expectedNames?: string[];
   directory?: string;
 }
@@ -39,6 +40,7 @@ interface LogoInfo {
 interface ServerLogo {
   brand: string;
   slug: string;
+  filename?: string;
 }
 
 const EMPTY_FIELDS: ExifFields = {
@@ -57,6 +59,7 @@ const EMPTY_FIELDS: ExifFields = {
 };
 
 const TEMPLATE_CLASSES: Record<string, string> = {
+  'exif-split': 'bg-[#f0eff4] text-neutral-950',
   'classic-white': 'bg-[#f7f4ef] text-neutral-950',
   'minimal-black': 'bg-neutral-950 text-neutral-50',
   magazine: 'bg-[#ece7dc] text-neutral-950',
@@ -70,7 +73,7 @@ const TEMPLATE_CLASSES: Record<string, string> = {
 
 const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
-  const [templateId, setTemplateId] = useState('classic-white');
+  const [templateId, setTemplateId] = useState('exif-split');
   const [fields, setFields] = useState<ExifFields>(EMPTY_FIELDS);
   const [logo, setLogo] = useState<LogoInfo>({ available: false });
   const [serverLogos, setServerLogos] = useState<ServerLogo[]>([]);
@@ -126,9 +129,12 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
       fields.iso ? `ISO ${fields.iso}` : ''
     ].filter(Boolean).join('   ');
   }, [fields]);
+  const exposureLine = [fields.iso ? `ISO ${fields.iso}` : '', fields.focalLength, fields.aperture, fields.shutter].filter(Boolean).join('   ');
+  const cameraLine = [fields.camera, fields.lens].filter(Boolean).join('  |  ');
 
   const updateField = (key: keyof ExifFields, value: string) => {
     setFields(prev => ({ ...prev, [key]: value }));
+    if (key === 'brand') setLogo({ available: false });
     setResultUrl('');
   };
 
@@ -192,13 +198,20 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
   };
 
   const selectedTemplate = templates.find(item => item.id === templateId);
-  const isDark = templateId === 'minimal-black';
+  const selectedServerLogo = serverLogos.find(item => item.brand.toLowerCase() === fields.brand.toLowerCase());
+  const previewLogoUrl = customLogoDataUrl || (selectedServerLogo
+    ? `/photowall/api/exif-frame/logo/${encodeURIComponent(selectedServerLogo.slug)}`
+    : logo.url || '');
+  const isDark = templateId === 'minimal-black' || templateId === 'blurred-glass';
   const isBlurredGlass = templateId === 'blurred-glass';
   const frameClass = TEMPLATE_CLASSES[templateId] || TEMPLATE_CLASSES['classic-white'];
+  const previewLogo = previewLogoUrl
+    ? <img src={previewLogoUrl} alt={`${fields.brand || 'Camera'} logo`} draggable={false} className="h-full w-full object-contain" />
+    : <span className="font-black uppercase leading-none break-words">{fields.brand || 'CAMERA'}</span>;
 
   return (
     <div className="fixed inset-0 z-[70] bg-obsidian/95 backdrop-blur-md text-white flex flex-col">
-      <div className="flex items-center justify-between gap-4 px-4 md:px-6 py-4 border-b border-white/10">
+      <div className="flex shrink-0 items-center justify-between gap-4 px-4 md:px-6 py-4 border-b border-white/10">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.24em] text-gold">EXIF Frame</p>
           <h2 className="text-xl md:text-2xl font-serif truncate">{photo.title}</h2>
@@ -212,7 +225,7 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="h-full min-h-[480px] flex items-center justify-center text-gray-400">
             <Loader2 size={28} className="animate-spin mr-3" />
@@ -222,47 +235,52 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(420px,1fr)_420px] gap-5 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
             <section className="space-y-4">
               <div className="rounded-lg bg-charcoal/70 border border-white/10 p-3 md:p-5">
-                <div
-                  className={`mx-auto w-full max-w-4xl p-[5%] shadow-2xl ${frameClass}`}
-                  style={isBlurredGlass ? {
-                    backgroundImage: `linear-gradient(rgba(0,0,0,0.36), rgba(0,0,0,0.46)), url(${photo.url})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center'
-                  } : undefined}
-                >
-                  <div className={`bg-black/5 ${isDark ? 'ring-1 ring-white/10' : 'ring-1 ring-black/5'}`}>
-                    <img
-                      src={photo.url}
-                      alt={photo.title}
-                      className="w-full max-h-[58vh] object-contain select-none"
-                      draggable={false}
-                    />
-                  </div>
-                  <div className="grid grid-cols-[28%_1fr] gap-[4%] pt-[5%] items-start">
-                    <div className="min-h-16 flex items-start">
-                      <div className="font-black text-2xl md:text-4xl uppercase leading-none break-words">
-                        {fields.brand || 'CAMERA'}
+                {templateId === 'exif-split' ? (
+                  <div className="mx-auto w-full max-w-4xl bg-[#f0eff4] p-[2.5%] text-neutral-950 shadow-2xl">
+                    <div className="bg-white">
+                      <img src={photo.url} alt={photo.title} className="block w-full max-h-[58vh] object-contain select-none" draggable={false} />
+                      <div className="flex items-center justify-between gap-3 px-[2%] py-[2%] min-h-[65px]">
+                        <div className="min-w-0 flex-1 text-left leading-tight">
+                          <p className="text-[10px] sm:text-sm font-semibold truncate">{exposureLine || 'EXIF data unavailable'}</p>
+                          <p className="text-[9px] sm:text-xs text-neutral-500 truncate">{fields.date}</p>
+                        </div>
+                        <div className="flex min-w-0 w-[43%] items-center justify-end gap-[4%]">
+                          <div className="h-6 sm:h-10 w-[36%] min-w-0 text-sm sm:text-xl text-center">{previewLogo}</div>
+                          <div className="h-7 sm:h-10 border-l border-neutral-400" />
+                          <div className="min-w-0 text-right leading-tight">
+                            <p className="text-[9px] sm:text-xs font-bold truncate">{fields.camera}</p>
+                            <p className="text-[8px] sm:text-[11px] text-neutral-500 truncate">{fields.lens}</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    <div className="space-y-2 min-w-0">
-                      {templateId === 'magazine' && (
-                        <p className="text-xl md:text-3xl font-semibold truncate">{fields.title || photo.title}</p>
-                      )}
-                      <p className="text-base md:text-xl font-semibold break-words">
-                        {[fields.camera, fields.lens].filter(Boolean).join('  |  ') || 'Unknown Camera'}
-                      </p>
-                      <p className="text-base md:text-xl break-words">{settingsLine || 'EXIF data unavailable'}</p>
-                      <p className={`text-sm md:text-base ${isDark ? 'text-neutral-400' : 'text-neutral-500'} break-words`}>
-                        {[fields.date, fields.location].filter(Boolean).join(' / ')}
-                      </p>
-                      {fields.signature && (
-                        <p className={`text-xs md:text-sm pt-3 ${isDark ? 'text-neutral-500' : 'text-neutral-500'}`}>
-                          {fields.signature}
-                        </p>
-                      )}
+                  </div>
+                ) : isBlurredGlass ? (
+                  <div className="relative isolate mx-auto w-full max-w-4xl overflow-hidden bg-neutral-950 px-[11%] pt-[6%] pb-[4%] text-white shadow-2xl">
+                    <div className="absolute -inset-8 -z-10 bg-cover bg-center blur-2xl brightness-[0.6]" style={{ backgroundImage: `url(${photo.url})` }} />
+                    <img src={photo.url} alt={photo.title} className="relative block w-full max-h-[52vh] object-contain shadow-2xl select-none" draggable={false} />
+                    <div className="pt-[3%] text-center text-[10px] sm:text-sm leading-snug">
+                      <p className="truncate">{cameraLine || 'Unknown Camera'}</p>
+                      <p className="truncate">{exposureLine || 'EXIF data unavailable'}</p>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className={`mx-auto w-full max-w-4xl p-[5%] shadow-2xl ${frameClass}`}>
+                    <div className={`bg-black/5 ${isDark ? 'ring-1 ring-white/10' : 'ring-1 ring-black/5'}`}>
+                      <img src={photo.url} alt={photo.title} className="w-full max-h-[58vh] object-contain select-none" draggable={false} />
+                    </div>
+                    <div className="grid grid-cols-[28%_1fr] gap-[4%] pt-[5%] items-start">
+                      <div className="h-14 md:h-16 w-full text-2xl md:text-4xl">{previewLogo}</div>
+                      <div className="space-y-2 min-w-0">
+                        {templateId === 'magazine' && <p className="text-xl md:text-3xl font-semibold truncate">{fields.title || photo.title}</p>}
+                        <p className="text-base md:text-xl font-semibold break-words">{cameraLine || 'Unknown Camera'}</p>
+                        <p className="text-base md:text-xl break-words">{settingsLine || 'EXIF data unavailable'}</p>
+                        <p className={`text-sm md:text-base ${isDark ? 'text-neutral-400' : 'text-neutral-500'} break-words`}>{[fields.date, fields.location].filter(Boolean).join(' / ')}</p>
+                        {fields.signature && <p className="text-xs md:text-sm pt-3 text-neutral-500">{fields.signature}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {error && (
@@ -284,25 +302,25 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
               )}
             </section>
 
-            <aside className="space-y-5">
+            <aside className="space-y-4 xl:max-h-[calc(100dvh-8rem)] xl:overflow-y-auto xl:pr-2">
               <div className="rounded-lg bg-charcoal/80 border border-white/10 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-300">模板</h3>
                   <ImageIcon size={17} className="text-gold" />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {templates.map(template => (
                     <button
                       key={template.id}
                       onClick={() => setTemplateId(template.id)}
-                      className={`text-left rounded-md border px-3 py-2 transition-colors ${
+                      title={template.description}
+                      className={`min-h-10 rounded-md border px-2 py-2 text-center transition-colors ${
                         templateId === template.id
                           ? 'border-gold bg-gold/10 text-white'
                           : 'border-white/10 bg-white/[0.03] text-gray-300 hover:border-white/25'
                       }`}
                     >
-                      <span className="block text-sm font-medium">{template.name}</span>
-                      <span className="block text-xs text-gray-500 mt-1 leading-relaxed">{template.description}</span>
+                      <span className="block text-xs font-medium leading-tight">{template.name}</span>
                     </button>
                   ))}
                 </div>
@@ -318,7 +336,7 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                     {customLogoDataUrl
                       ? `本次将使用你上传的 ${customLogoName}；文件不会保存到服务器。`
                       : logo.available
-                      ? `已匹配 ${logo.filename}，生成时会优先使用目录中的 logo。`
+                      ? `已匹配 ${logo.filename}，预览与合成会使用透明 PNG。`
                       : '可选择服务器已安装的 Logo，或上传本次专用水印；没有匹配时将使用文字品牌。'}
                   </p>
                 </div>
@@ -330,6 +348,12 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                       setCustomLogoDataUrl('');
                       setCustomLogoName('');
                       updateField('brand', event.target.value);
+                      const selected = serverLogos.find(item => item.brand === event.target.value);
+                      setLogo(selected ? {
+                        available: true,
+                        filename: selected.filename || selected.slug,
+                        url: `/photowall/api/exif-frame/logo/${encodeURIComponent(selected.slug)}`
+                      } : { available: false });
                     }}
                     className="w-full rounded-md bg-black/30 border border-white/10 px-3 py-2 text-sm text-white outline-none focus:border-gold"
                   >
@@ -362,7 +386,7 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                   </label>
                   <p className="text-xs text-gray-500">最大 2MB。上传内容只随当前请求处理，不会写入服务器 Logo 库。</p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                   {([
                     ['brand', '品牌'],
                     ['camera', '相机'],
@@ -388,14 +412,16 @@ const ExifFramePanel: React.FC<ExifFramePanelProps> = ({ photo, onClose }) => {
                 </div>
               </div>
 
-              <button
-                onClick={generateFrame}
-                disabled={generating}
-                className="w-full rounded-md bg-gold text-obsidian hover:bg-gold/90 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors"
-              >
-                {generating ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-                {generating ? '生成中...' : '生成并下载'}
-              </button>
+              <div className="sticky bottom-0 rounded-lg border border-white/10 bg-obsidian/95 p-2 backdrop-blur">
+                <button
+                  onClick={generateFrame}
+                  disabled={generating}
+                  className="w-full rounded-md bg-gold text-obsidian hover:bg-gold/90 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors"
+                >
+                  {generating ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                  {generating ? '生成中...' : '生成并下载'}
+                </button>
+              </div>
             </aside>
           </div>
         )}

@@ -53,7 +53,7 @@ export default function PhotoMapView({ query, revision, isApiAvailable, savedVie
     const previous = savedView.current;
     const map = L.map(element.current, {
       center: previous?.center || [30, 105], zoom: previous?.zoom ?? 3,
-      minZoom: 1, maxZoom: 19, worldCopyJump: true, scrollWheelZoom: false
+      minZoom: 1, maxZoom: 19, worldCopyJump: true, scrollWheelZoom: true
     });
     mapRef.current = map;
     const observer = new ResizeObserver(() => map.invalidateSize());
@@ -73,6 +73,7 @@ export default function PhotoMapView({ query, revision, isApiAvailable, savedVie
       ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
       : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, maxNativeZoom: satellite ? 17 : 19,
+      updateWhenZooming: false, keepBuffer: 3,
       attribution: satellite ? 'Tiles &copy; Esri' : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
     tiles.on('tileerror', () => setTileError(true));
@@ -199,6 +200,6 @@ export default function PhotoMapView({ query, revision, isApiAvailable, savedVie
       {clusterLoading ? <Loader2 size={18} className="mx-auto mt-3 animate-spin text-gold" /> : clusterPhotos.length < clusterTotal && !clusterError &&
         <button onClick={() => setClusterOffset(clusterPhotos.length)} className="mt-3 w-full rounded border border-white/10 py-2 text-xs text-gold">更多照片（{clusterPhotos.length} / {clusterTotal}）</button>}
     </aside>}
-    <p className="absolute bottom-2 left-3 z-[500] text-[10px] text-gray-500 pointer-events-none">原始 GPS 拍摄位置 · 双指缩放或使用 ＋／－</p>
+    <p className="absolute bottom-2 left-3 z-[500] text-[10px] text-gray-500 pointer-events-none">原始 GPS 拍摄位置 · 滚轮或双指缩放</p>
   </section>;
 }

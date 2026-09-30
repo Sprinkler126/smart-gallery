@@ -15,4 +15,6 @@ Naming convention:
 
 Supported formats: `svg`, `png`, `jpg`, `jpeg`, `webp`.
 
-Logo files remain ignored by Git. Before downloading, users must accept WorldVectorLogo's terms and remain responsible for trademark and copyright compliance.
+`lumix.png` is the transparent LUMIX text logo from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Lumix_logo.svg), which identifies it as a public-domain text logo and notes its trademark status.
+
+Other downloaded logo files remain ignored by Git. Before downloading the WorldVectorLogo pack, users must accept its terms and remain responsible for trademark and copyright compliance.

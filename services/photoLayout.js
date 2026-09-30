@@ -1,8 +1,10 @@
 // Layout coordinates are independent of the DOM, so off-screen cards need no elements.
 export function buildPhotoLayout(photos, width, mode = 'MASONRY') {
   if (width <= 0) return { items: [], height: 0 };
-  const gap = width >= 768 ? 24 : 12;
-  const columns = width >= 1024 ? 3 : width >= 640 ? 2 : 1;
+  const gap = mode === 'GRID' ? (width >= 768 ? 8 : 4) : width >= 768 ? 24 : 12;
+  const columns = mode === 'GRID'
+    ? width >= 1152 ? 6 : width >= 768 ? 4 : 3
+    : width >= 1024 ? 3 : width >= 640 ? 2 : 1;
   const columnWidth = (width - gap * (columns - 1)) / columns;
   const items = [];
   let height = 0;
@@ -37,7 +39,7 @@ export function buildPhotoLayout(photos, width, mode = 'MASONRY') {
     let rowHeight = 0;
     for (let index = 0; index < photos.length; index++) {
       const dimensions = photos[index].dimensions;
-      const ratio = dimensions?.width > 0 && dimensions?.height > 0 ? dimensions.width / dimensions.height : 1.5;
+      const ratio = mode === 'GRID' ? 1 : dimensions?.width > 0 && dimensions?.height > 0 ? dimensions.width / dimensions.height : 1.5;
       const itemHeight = columnWidth / ratio;
       let column;
       let y;

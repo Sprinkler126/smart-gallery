@@ -153,8 +153,12 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         apiKeyConfigured: Boolean(process.env.WORLD_VECTOR_LOGO_API_KEY),
         count: logos.length,
         logos,
-        missing: BRAND_LOGO_PACK.filter(item => !logos.includes(`${item.slug}.svg`)).map(item => item.slug),
-        available: BRAND_LOGO_PACK.filter(item => logos.includes(`${item.slug}.svg`)).map(item => ({ brand: item.brand, slug: item.slug }))
+        missing: BRAND_LOGO_PACK.filter(item => !['svg', 'png', 'jpg', 'jpeg', 'webp'].some(ext => logos.includes(`${item.slug}.${ext}`))).map(item => item.slug),
+        available: BRAND_LOGO_PACK.filter(item => ['svg', 'png', 'jpg', 'jpeg', 'webp'].some(ext => logos.includes(`${item.slug}.${ext}`))).map(item => ({
+          brand: item.brand,
+          slug: item.slug,
+          filename: logos.find(name => ['png', 'svg', 'jpg', 'jpeg', 'webp'].some(ext => name === `${item.slug}.${ext}`))
+        }))
       }
     };
   };
@@ -171,10 +175,10 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
 
   const BRAND_LOGO_PACK = [
     ['Canon', 'canon-2'], ['Nikon', 'nikon'], ['Sony', 'sony'], ['Fujifilm', 'fujifilm'],
-    ['Leica', 'leica'], ['Panasonic', 'panasonic'], ['Olympus', 'olympus'], ['DJI', 'dji'],
+    ['Leica', 'leica'], ['Panasonic', 'lumix', 'lumix'], ['Olympus', 'olympus'], ['DJI', 'dji'],
     ['Apple', 'apple'], ['Xiaomi', 'xiaomi'], ['Huawei', 'huawei'], ['Samsung', 'samsung'],
     ['GoPro', 'gopro'], ['Ricoh', 'ricoh'], ['Pentax', 'pentax'], ['Sigma', 'sigma']
-  ].map(([brand, sourceSlug]) => ({ brand, slug: brand.toLowerCase().replace(/[^a-z0-9]+/g, '-'), sourceSlug }));
+  ].map(([brand, sourceSlug, slug]) => ({ brand, slug: slug || brand.toLowerCase().replace(/[^a-z0-9]+/g, '-'), sourceSlug }));
   let logoDownloadPromise = null;
 
   const downloadBrandLogoPack = async () => {
@@ -183,7 +187,8 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
     const results = [];
     for (const item of BRAND_LOGO_PACK) {
       const outputPath = path.join(logoDir, `${item.slug}.svg`);
-      if (await fs.pathExists(outputPath)) { results.push({ ...item, status: 'already_installed' }); continue; }
+      const pngPath = path.join(logoDir, `${item.slug}.png`);
+      if (await fs.pathExists(outputPath) || await fs.pathExists(pngPath)) { results.push({ ...item, status: 'already_installed' }); continue; }
       try {
         const headers = { Accept: 'application/json' };
         if (process.env.WORLD_VECTOR_LOGO_API_KEY) headers.Authorization = `Bearer ${process.env.WORLD_VECTOR_LOGO_API_KEY}`;
@@ -1318,6 +1323,17 @@ export function createApiRouter(galleryService, aiAnalysisService, vectorSearchS
         success: true,
         data: exifFrameService.getTemplates()
       });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.get('/exif-frame/logo/:slug', async (req, res) => {
+    try {
+      const buffer = await exifFrameService.getLogoPngBuffer(req.params.slug);
+      if (!buffer) return res.status(404).json({ success: false, error: 'Brand logo not found' });
+      res.set('Cache-Control', 'public, max-age=86400');
+      res.type('png').send(buffer);
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }

@@ -763,8 +763,8 @@ const App: React.FC = () => {
               <button 
                 onClick={() => setViewMode(ViewMode.GRID)}
                 className={viewMode === ViewMode.GRID ? toolbarActionActiveClass : toolbarActionClass}
-                title="浏览：网格视图"
-                aria-label="网格视图"
+                title="浏览：方形网格（1:1）"
+                aria-label="1:1 方形网格"
               >
                 <Grid size={18} />
               </button>
@@ -1064,7 +1064,7 @@ const App: React.FC = () => {
                       blurPlaceholder={photo.blurPlaceholder}
                       alt={photo.title}
                       className="h-full w-full"
-                      aspectRatio={viewMode === ViewMode.TIMELINE ? '1' : photo.dimensions ? `${photo.dimensions.width}/${photo.dimensions.height}` : '3/2'}
+                      aspectRatio={viewMode === ViewMode.GRID || viewMode === ViewMode.TIMELINE ? '1' : photo.dimensions ? `${photo.dimensions.width}/${photo.dimensions.height}` : '3/2'}
 
                     />
                     
